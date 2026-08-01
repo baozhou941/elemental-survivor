@@ -1,0 +1,17 @@
+{
+  "name": "elemental-survivor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test \"tests/*.test.js\"",
+    "test:e2e": "playwright test e2e/game.spec.js",
+    "test:playtest": "playwright test e2e/playtest.spec.js",
+    "test:balance": "node scripts/simulate-balance.mjs --runs 30 --duration 180 --output artifacts/playtest/v0.4-balance-30-seeds.json",
+    "check": "node --check src/main.js && node --test \"tests/*.test.js\""
+  },
+  "devDependencies": {
+    "@playwright/test": "latest"
+  }
+}

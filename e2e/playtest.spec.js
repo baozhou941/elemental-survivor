@@ -1,0 +1,64 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { expect, test } from '@playwright/test';
+
+import { steeringKeys } from './playtest-steering.js';
+
+const OUTPUT_DIR = 'artifacts/playtest';
+const PLAYTEST_ROUTE = process.env.PLAYTEST_ROUTE === 'ice' ? 'ice' : 'wind';
+const PLAYTEST_DURATION = Number(process.env.PLAYTEST_DURATION ?? 180);
+const PLAYTEST_URL = process.env.PLAYTEST_URL ?? '/?test=1';
+const PLAYTEST_LABEL = process.env.PLAYTEST_LABEL ?? `v0.5-${PLAYTEST_ROUTE}-three-minute`;
+const ROUTES = {
+  wind: { unlock: 'windBladeUnlock', reaction: 'fireTornado' },
+  ice: { unlock: 'iceShardUnlock', reaction: 'thermalShock' },
+};
+const ROUTE = ROUTES[PLAYTEST_ROUTE];
+const PICK_PRIORITY = [
+  ROUTE.unlock,
+  ROUTE.reaction,
+  'fireballVolley',
+  'windBladeHaste',
+  'fleetFooted',
+];
+
+async function snapshot(page) {
+  return page.evaluate(() => window.__ELEMENTAL_SURVIVOR__.snapshot());
+}
+
+async function move(page, keys, duration = 160) {
+  for (const key of keys) await page.keyboard.down(key);
+  await page.waitForTimeout(duration);
+  for (const key of keys) await page.keyboard.up(key);
+}
+
+async function chooseUpgrade(page) {
+  const cards = page.locator('[data-upgrade-id]');
+  const ids = await cards.evaluateAll((nodes) => nodes.map((node) => node.dataset.upgradeId));
+  const preferred = PICK_PRIORITY.find((id) => ids.includes(id)) ?? ids[0];
+  await page.locator(`[data-upgrade-id="${preferred}"]`).click();
+}
+
+test('自动避敌试玩可以持续三分钟并记录本地战斗遥测', async ({ page }) => {
+  test.setTimeout(240_000);
+  await mkdir(OUTPUT_DIR, { recursive: true });
+  await page.goto(PLAYTEST_URL);
+  await page.getByRole('button', { name: '开始觉醒' }).click();
+
+  let run = await snapshot(page);
+  while (run.time < PLAYTEST_DURATION && run.state !== 'gameOver') {
+    if (run.state === 'levelUp') await chooseUpgrade(page);
+    else await move(page, steeringKeys(run));
+    run = await snapshot(page);
+  }
+
+  await page.screenshot({ path: `${OUTPUT_DIR}/${PLAYTEST_LABEL}.png` });
+  await writeFile(`${OUTPUT_DIR}/${PLAYTEST_LABEL}.json`, `${JSON.stringify(run, null, 2)}\n`);
+
+  expect(run.time, `未达到 ${PLAYTEST_DURATION} 秒；遥测：${JSON.stringify(run.stats)}`).toBeGreaterThanOrEqual(PLAYTEST_DURATION);
+  expect(run.stats.kills).toBeGreaterThan(0);
+  expect(run.player.level).toBeGreaterThan(1);
+  if (PLAYTEST_DURATION >= 180) {
+    expect(run.reactions).toEqual([ROUTE.reaction]);
+  }
+  expect(run.stats.fps.average).toBeGreaterThan(45);
+});
