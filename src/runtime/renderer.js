@@ -90,6 +90,12 @@ export class Renderer {
         }
       } else if (event.type === 'reactionHit') {
         this.shake = Math.max(this.shake, 3.5);
+      } else if (event.type === 'burstActivate') {
+        this.shake = Math.max(this.shake, 6.5);
+        this.flash = Math.max(this.flash, 0.2);
+        this.bursts.push({ x: event.x, y: event.y, startedAt: now, duration: 620, type: 'overdrive' });
+      } else if (event.type === 'eliteSpawn') {
+        this.shake = Math.max(this.shake, 3.2);
       }
     }
   }
@@ -145,6 +151,16 @@ export class Renderer {
       context.lineTo(Math.min(width, cameraX + this.width), y);
     }
     context.stroke();
+    const accentGrid = 320;
+    context.strokeStyle = 'rgba(99, 241, 194, 0.055)';
+    context.lineWidth = 1;
+    context.beginPath();
+    for (let x = Math.max(0, Math.floor(cameraX / accentGrid) * accentGrid); x <= Math.min(width, cameraX + this.width + accentGrid); x += accentGrid) {
+      for (let y = Math.max(0, Math.floor(cameraY / accentGrid) * accentGrid); y <= Math.min(height, cameraY + this.height + accentGrid); y += accentGrid) {
+        polygon(context, x, y, 28, 6, Math.PI / 6);
+      }
+    }
+    context.stroke();
     context.strokeStyle = 'rgba(88, 232, 255, 0.28)';
     context.lineWidth = 3;
     context.strokeRect(1.5, 1.5, width - 3, height - 3);
@@ -157,16 +173,30 @@ export class Renderer {
       const dx = orb.x - player.x;
       const dy = orb.y - player.y;
       const isNear = dx * dx + dy * dy <= pickupRadiusSquared;
-      context.shadowBlur = isNear ? 7 : 0;
-      context.fillStyle = isNear ? 'rgba(121,245,207,.18)' : 'rgba(121,245,207,.03)';
-      context.strokeStyle = isNear ? '#79f5cf' : 'rgba(121,245,207,.5)';
-      context.lineWidth = isNear ? 2 : 1;
-      polygon(context, orb.x, orb.y, orb.radius + 1, 4, Math.PI / 4);
+      const tier = orb.tier ?? 'small';
+      const isElite = tier === 'elite';
+      const isRare = tier === 'rare';
+      const color = isElite || isRare ? '#ffd166' : '#79f5cf';
+      context.shadowColor = color;
+      context.shadowBlur = isNear || isElite ? 13 : isRare ? 7 : 2;
+      context.fillStyle = isElite
+        ? 'rgba(255,209,102,.3)'
+        : isRare ? 'rgba(255,209,102,.18)' : isNear ? 'rgba(121,245,207,.2)' : 'rgba(239,252,255,.08)';
+      context.strokeStyle = isNear || isElite ? color : isRare ? 'rgba(255,209,102,.72)' : 'rgba(121,245,207,.62)';
+      context.lineWidth = isElite ? 2.5 : isNear || isRare ? 2 : 1;
+      polygon(context, orb.x, orb.y, orb.radius + (isElite ? 5 : 1), isElite || isRare ? 6 : 4, Math.PI / 4);
       context.fill();
       context.stroke();
-      if (isNear) {
+      if (isElite) {
+        context.strokeStyle = 'rgba(255,255,255,.72)';
+        context.lineWidth = 1.5;
+        polygon(context, orb.x, orb.y, orb.radius + 10, 6, -Math.PI / 4);
+        context.stroke();
+      }
+      if (isNear || isRare || isElite) {
         context.fillStyle = '#effff9';
-        context.fillRect(orb.x - 1, orb.y - 1, 2, 2);
+        polygon(context, orb.x, orb.y, Math.max(2, orb.radius * 0.42), 4, Math.PI / 4);
+        context.fill();
       }
     }
     context.shadowBlur = 0;
@@ -179,6 +209,19 @@ export class Renderer {
       context.shadowColor = color;
       context.shadowBlur = 16;
       context.fillStyle = color;
+      context.strokeStyle = 'rgba(255,255,255,.82)';
+      context.lineWidth = 1.5;
+      const trailLength = projectile.behavior === 'vacuumBlade' ? 22 : projectile.behavior === 'mirrorIce' ? 18 : 12;
+      const velocityLength = Math.hypot(projectile.vx, projectile.vy) || 1;
+      context.strokeStyle = `${color}88`;
+      context.lineWidth = projectile.behavior ? 3 : 1.5;
+      context.beginPath();
+      context.moveTo(projectile.x, projectile.y);
+      context.lineTo(
+        projectile.x - projectile.vx / velocityLength * trailLength,
+        projectile.y - projectile.vy / velocityLength * trailLength,
+      );
+      context.stroke();
       context.strokeStyle = 'rgba(255,255,255,.82)';
       context.lineWidth = 1.5;
       if (projectile.element === 'ice') {
@@ -214,9 +257,10 @@ export class Renderer {
     for (const burst of this.bursts) {
       const progress = (now - burst.startedAt) / burst.duration;
       const alpha = 1 - progress;
-      const radius = 18 + progress * 62;
+      const isOverdrive = burst.type === 'overdrive';
+      const radius = 18 + progress * (isOverdrive ? 150 : 62);
       context.lineWidth = 5 - progress * 3;
-      context.strokeStyle = `rgba(145,221,255,${alpha * 0.9})`;
+      context.strokeStyle = `rgba(${isOverdrive ? '99,241,194' : '145,221,255'},${alpha * 0.9})`;
       context.beginPath();
       context.arc(burst.x, burst.y, radius, 0, Math.PI * 2);
       context.stroke();
@@ -225,6 +269,12 @@ export class Renderer {
       context.beginPath();
       context.arc(burst.x, burst.y, radius * 0.68, 0, Math.PI * 2);
       context.stroke();
+      if (isOverdrive) {
+        context.strokeStyle = `rgba(255,255,255,${alpha * 0.55})`;
+        context.lineWidth = 2;
+        polygon(context, burst.x, burst.y, radius * 0.82, 6, progress * Math.PI);
+        context.stroke();
+      }
     }
   }
 
@@ -286,6 +336,20 @@ export class Renderer {
       context.fill();
       context.stroke();
 
+      context.fillStyle = 'rgba(7,11,24,.72)';
+      context.beginPath();
+      if (enemy.type === 'swift') {
+        context.moveTo(radius * 0.5, 0);
+        context.lineTo(-radius * 0.18, radius * 0.34);
+        context.lineTo(-radius * 0.18, -radius * 0.34);
+      } else if (enemy.type === 'brute') {
+        polygon(context, 0, 0, radius * 0.48, 6, Math.PI / 6);
+      } else {
+        polygon(context, 0, 0, radius * 0.42, 4, Math.PI / 4);
+      }
+      context.closePath();
+      context.fill();
+
       context.strokeStyle = 'rgba(7,11,24,.78)';
       context.lineWidth = enemy.type === 'brute' ? 3.5 : 2;
       context.beginPath();
@@ -305,6 +369,17 @@ export class Renderer {
         context.lineTo(-2, 5);
       }
       context.stroke();
+      if (enemy.elite) {
+        context.shadowColor = '#ffd166';
+        context.shadowBlur = 12;
+        context.strokeStyle = '#ffd166';
+        context.lineWidth = 2.5;
+        polygon(context, 0, 0, radius + 8, 6, runPulse(time, enemy.id));
+        context.stroke();
+        context.shadowBlur = 0;
+        context.fillStyle = '#ffd166';
+        context.fillRect(-6, -radius - 13, 12, 3);
+      }
       if (slowed) drawSlowOverlay(context, radius);
       context.restore();
 
@@ -321,6 +396,21 @@ export class Renderer {
     for (const reaction of reactions) {
       const definition = this.config.reactions[reaction.id];
       const radius = definition?.radius ?? 72;
+      if (reaction.id === 'fireTornado') {
+        context.strokeStyle = 'rgba(255,245,190,.7)';
+        context.lineWidth = 2;
+        for (let ring = 0; ring < 3; ring += 1) {
+          context.beginPath();
+          context.arc(
+            reaction.x,
+            reaction.y,
+            radius * (0.28 + ring * 0.17),
+            reaction.angle + ring,
+            reaction.angle + ring + Math.PI * 1.25,
+          );
+          context.stroke();
+        }
+      }
       const gradient = context.createRadialGradient(reaction.x, reaction.y, 8, reaction.x, reaction.y, radius);
       gradient.addColorStop(0, 'rgba(255,232,120,.95)');
       gradient.addColorStop(0.35, 'rgba(255,96,48,.72)');
@@ -363,9 +453,10 @@ export class Renderer {
     this.playerPose.x = player.x;
     this.playerPose.y = player.y;
 
-    context.shadowColor = '#58e8ff';
-    context.shadowBlur = 22;
-    context.fillStyle = invulnerable && Math.floor(run.time * 15) % 2 ? 'rgba(239,252,255,.38)' : '#effcff';
+    const burstActive = run.time < run.burst.activeUntil;
+    context.shadowColor = burstActive ? '#ffd166' : '#58e8ff';
+    context.shadowBlur = burstActive ? 34 : 22;
+    context.fillStyle = invulnerable && Math.floor(run.time * 15) % 2 ? 'rgba(239,252,255,.38)' : '#dffcff';
     context.beginPath();
     context.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
     context.fill();
@@ -374,7 +465,7 @@ export class Renderer {
     context.save();
     context.translate(player.x, player.y);
     context.rotate(this.playerPose.angle);
-    context.strokeStyle = '#58e8ff';
+    context.strokeStyle = burstActive ? '#ffd166' : '#58e8ff';
     context.lineWidth = 3.5;
     context.beginPath();
     context.arc(0, 0, player.radius + 7, -0.78, 0.78);
@@ -394,6 +485,25 @@ export class Renderer {
     context.lineTo(forwardOffset, -5);
     context.closePath();
     context.fill();
+
+    const elements = Object.values(run.weapons).map(({ element }) => element);
+    elements.forEach((element, index) => {
+      const angle = run.time * 1.8 + index * Math.PI * 2 / elements.length;
+      const orbit = player.radius + 12;
+      context.fillStyle = COLORS[element] ?? '#ffffff';
+      polygon(context, Math.cos(angle) * orbit, Math.sin(angle) * orbit, 2.8, 4, angle);
+      context.fill();
+    });
+    if (burstActive) {
+      context.strokeStyle = 'rgba(255,209,102,.65)';
+      context.lineWidth = 2;
+      polygon(context, 0, 0, player.radius + 14, 6, run.time * 1.5);
+      context.stroke();
+    }
     context.restore();
   }
+}
+
+function runPulse(time, id = 0) {
+  return time * 0.8 + id * 0.37;
 }

@@ -168,6 +168,46 @@ kbd {
   font-size: 13px;
 }
 
+.leaderboard-card {
+  width: min(100%, 430px);
+  margin: 22px auto 0;
+  padding: 14px 18px;
+  border: 1px solid rgba(145, 221, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(3, 8, 20, 0.46);
+  text-align: left;
+}
+
+.leaderboard-card h2,
+.leaderboard-card h3 {
+  margin: 0 0 8px;
+  color: #a9bddb;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.leaderboard-list {
+  margin: 0;
+  padding-left: 28px;
+  color: #ddecff;
+  font-size: 13px;
+}
+
+.leaderboard-list li {
+  padding: 3px 0 3px 4px;
+}
+
+.leaderboard-list li::marker {
+  color: #ffcf6b;
+  font-weight: 900;
+}
+
+.leaderboard-list__empty {
+  color: #6f83a1;
+  list-style: none;
+}
+
 .hud {
   position: absolute;
   z-index: 5;
@@ -180,6 +220,24 @@ kbd {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: start;
+}
+
+.event-banner {
+  position: absolute;
+  top: max(76px, calc(env(safe-area-inset-top) + 62px));
+  left: 50%;
+  min-width: min(78vw, 360px);
+  padding: 9px 18px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 205, 104, 0.42);
+  border-radius: 999px;
+  background: rgba(7, 11, 24, 0.82);
+  box-shadow: 0 0 28px rgba(255, 157, 66, 0.15);
+  color: #ffe2a6;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-align: center;
 }
 
 .hud__label,
@@ -294,6 +352,85 @@ kbd {
   transform: translateX(-50%);
 }
 
+.burst-button {
+  position: absolute;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(34px, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  width: 82px;
+  height: 82px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid rgba(126, 215, 255, 0.48);
+  border-radius: 50%;
+  background: rgba(5, 11, 26, 0.78);
+  color: white;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.burst-button__well,
+.burst-button__fill {
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+}
+
+.burst-button__well {
+  overflow: hidden;
+  background: rgba(88, 232, 255, 0.06);
+}
+
+.burst-button__fill {
+  inset: 0;
+  transform: scaleY(0);
+  transform-origin: center bottom;
+  background: linear-gradient(0deg, rgba(64, 208, 255, 0.72), rgba(255, 197, 88, 0.92));
+  transition: transform 120ms linear;
+}
+
+.burst-button strong,
+.burst-button small {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 5px #020612;
+}
+
+.burst-button strong {
+  margin-top: 7px;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.burst-button small {
+  margin-top: -22px;
+  color: #cbeeff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.burst-button--ready {
+  border-color: #ffd16a;
+  box-shadow: 0 0 26px rgba(255, 200, 88, 0.62), inset 0 0 18px rgba(255, 225, 145, 0.22);
+  animation: burst-ready 680ms ease-in-out infinite alternate;
+}
+
+.burst-button--active {
+  border-color: #ffffff;
+  box-shadow: 0 0 34px rgba(88, 232, 255, 0.92);
+}
+
+.burst-button:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+
+@keyframes burst-ready {
+  to { transform: scale(1.06); }
+}
+
 .weapon-chip {
   padding: 6px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -345,6 +482,16 @@ kbd {
   background: linear-gradient(145deg, rgba(255, 97, 55, 0.13), rgba(77, 238, 188, 0.08));
 }
 
+.upgrade-card--mutation {
+  border-color: rgba(190, 119, 255, 0.7);
+  background: linear-gradient(145deg, rgba(151, 76, 255, 0.14), rgba(88, 232, 255, 0.05));
+}
+
+.upgrade-card--mastery {
+  border-color: rgba(92, 214, 255, 0.5);
+  background: linear-gradient(145deg, rgba(88, 232, 255, 0.09), rgba(255, 255, 255, 0.035));
+}
+
 .upgrade-card span,
 .upgrade-card strong {
   display: block;
@@ -382,12 +529,28 @@ kbd {
   color: #ffb95f;
 }
 
+.upgrade-card--mutation .upgrade-card__rarity {
+  color: #d8a4ff;
+}
+
+.upgrade-card--mastery .upgrade-card__rarity {
+  color: #74e9ff;
+}
+
 .weapon-chip--fire { border-color: rgba(255, 106, 61, 0.52); }
 .weapon-chip--wind { border-color: rgba(86, 241, 188, 0.52); }
 .weapon-chip--ice { border-color: rgba(136, 207, 255, 0.52); }
 .weapon-chip--reaction {
   border-color: rgba(255, 185, 95, 0.75);
   color: #ffd99b;
+}
+.weapon-chip--mutation {
+  border-color: rgba(190, 119, 255, 0.72);
+  color: #dfb7ff;
+}
+.weapon-chip--mastery {
+  border-color: rgba(92, 214, 255, 0.48);
+  color: #aeeeff;
 }
 .weapon-chip--hint {
   border-style: dashed;
@@ -404,6 +567,8 @@ kbd {
 
 .compact-panel {
   width: min(90vw, 480px);
+  max-height: 94vh;
+  overflow-y: auto;
 }
 
 .run-summary {
@@ -412,6 +577,10 @@ kbd {
   gap: 10px;
   margin: 24px 0;
   color: #bdd0ea;
+}
+
+.leaderboard-card--game-over {
+  margin: -8px auto 20px;
 }
 
 .sr-only {
@@ -457,6 +626,13 @@ kbd {
     user-select: none;
   }
 
+  html[data-game-state="running"] .burst-button {
+    right: max(26px, env(safe-area-inset-right));
+    bottom: max(34px, env(safe-area-inset-bottom));
+    width: 96px;
+    height: 96px;
+  }
+
   .touch-stick__knob {
     position: absolute;
     top: 50%;
@@ -481,6 +657,11 @@ kbd {
     border-radius: 22px;
   }
 
+  .title-panel {
+    max-height: 94vh;
+    overflow-y: auto;
+  }
+
   .control-hint {
     flex-direction: column;
     gap: 8px;
@@ -497,13 +678,25 @@ kbd {
   }
 
   .xp-bar {
-    right: 8%;
-    left: 8%;
+    right: 24%;
+    left: 24%;
   }
 
   .xp-hint {
-    right: 8%;
-    left: 8%;
+    right: 24%;
+    left: 24%;
+  }
+
+  .weapon-strip {
+    bottom: 42px;
+    max-width: 52vw;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .event-banner {
+    top: max(66px, calc(env(safe-area-inset-top) + 54px));
+    font-size: 11px;
   }
 }
 

@@ -28,10 +28,12 @@ export function directionForPointer(origin, point, maxDistance = 56) {
 }
 
 export class InputSystem {
-  constructor(target = window, onPause = () => {}, pointerTarget = null) {
+  constructor(target = window, onPause = () => {}, pointerTarget = null, onBurst = () => {}, burstButton = null) {
     this.target = target;
     this.onPause = onPause;
     this.pointerTarget = pointerTarget;
+    this.onBurst = onBurst;
+    this.burstButton = burstButton;
     this.keys = new Set();
     this.pointerId = null;
     this.pointerOrigin = null;
@@ -42,6 +44,7 @@ export class InputSystem {
     this.handlePointerDown = this.handlePointerDown.bind(this);
     this.handlePointerMove = this.handlePointerMove.bind(this);
     this.handlePointerUp = this.handlePointerUp.bind(this);
+    this.handleBurstPointer = this.handleBurstPointer.bind(this);
     this.clear = this.clear.bind(this);
   }
 
@@ -54,6 +57,7 @@ export class InputSystem {
     this.pointerTarget?.addEventListener('pointermove', this.handlePointerMove);
     this.pointerTarget?.addEventListener('pointerup', this.handlePointerUp);
     this.pointerTarget?.addEventListener('pointercancel', this.handlePointerUp);
+    this.burstButton?.addEventListener('pointerdown', this.handleBurstPointer);
     this.attached = true;
   }
 
@@ -66,6 +70,7 @@ export class InputSystem {
     this.pointerTarget?.removeEventListener('pointermove', this.handlePointerMove);
     this.pointerTarget?.removeEventListener('pointerup', this.handlePointerUp);
     this.pointerTarget?.removeEventListener('pointercancel', this.handlePointerUp);
+    this.burstButton?.removeEventListener('pointerdown', this.handleBurstPointer);
     this.clear();
     this.attached = false;
   }
@@ -80,7 +85,18 @@ export class InputSystem {
     if ((event.code === 'Escape' || event.code === 'KeyP') && !event.repeat) {
       event.preventDefault();
       this.onPause();
+      return;
     }
+
+    if ((event.code === 'Space' || event.code === 'KeyE') && !event.repeat) {
+      event.preventDefault();
+      this.onBurst();
+    }
+  }
+
+  handleBurstPointer(event) {
+    event.preventDefault();
+    this.onBurst();
   }
 
   handleKeyUp(event) {

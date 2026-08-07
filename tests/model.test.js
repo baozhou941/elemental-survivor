@@ -3,14 +3,37 @@ import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/data/config.js';
 import {
+  activateBurst,
   applyUpgrade,
   createRun,
   createUpgradeChoices,
   damagePlayer,
   eligibleUpgrades,
+  gainBurstCharge,
   gainXp,
   restartRun,
 } from '../src/core/model.js';
+
+test('elemental burst charges, clamps, activates once, and opens a timed power window', () => {
+  const run = createRun({ state: 'running' });
+
+  assert.deepEqual(run.burst, {
+    charge: 0,
+    maxCharge: CONFIG.burst.maxCharge,
+    activeUntil: 0,
+    activations: 0,
+  });
+  assert.equal(activateBurst(run), false);
+
+  gainBurstCharge(run, CONFIG.burst.maxCharge + 25);
+  assert.equal(run.burst.charge, CONFIG.burst.maxCharge);
+  assert.equal(activateBurst(run), true);
+  assert.equal(run.burst.charge, 0);
+  assert.equal(run.burst.activeUntil, CONFIG.burst.duration);
+  assert.equal(run.burst.activations, 1);
+  assert.equal(activateBurst(run), false);
+  assert.ok(run.events.some(({ type }) => type === 'burstActivate'));
+});
 
 test('createRun starts at the title with only Fireball and empty transient state', () => {
   const run = createRun({ seed: 1234, runId: 7 });
@@ -28,7 +51,8 @@ test('createRun starts at the title with only Fireball and empty transient state
   assert.deepEqual(run.xpOrbs, []);
   assert.deepEqual(run.particles, []);
   assert.deepEqual(run.reactions, []);
-  assert.equal(run.reactionSlot, null);
+  assert.deepEqual(run.fusionSlots, []);
+  assert.deepEqual(run.weaponMutations, {});
   assert.deepEqual(run.reactionTriggerCooldowns, {});
   assert.deepEqual(run.stats.killsByType, {});
   assert.deepEqual(run.stats.peaks, { enemies: 0, projectiles: 0, particles: 0 });
@@ -209,7 +233,7 @@ test('reaction selection unlocks Fire Tornado exactly once', () => {
 
   assert.equal(applyUpgrade(run, 'fireTornado'), true);
   assert.equal(run.unlockedReactions.fireTornado, true);
-  assert.equal(run.reactionSlot, 'fireTornado');
+  assert.deepEqual(run.fusionSlots, ['fireTornado']);
 
   run.state = 'levelUp';
   run.pendingLevelUps = 1;
@@ -217,7 +241,7 @@ test('reaction selection unlocks Fire Tornado exactly once', () => {
   assert.equal(applyUpgrade(run, 'fireTornado'), false);
 });
 
-test('the first reaction locks the run to one reaction build', () => {
+test('two fusion slots allow both current reaction routes', () => {
   const run = createRun({ state: 'levelUp' });
   run.upgrades.windBladeUnlock = 1;
   run.upgrades.iceShardUnlock = 1;
@@ -225,13 +249,54 @@ test('the first reaction locks the run to one reaction build', () => {
   run.currentUpgradeChoices = ['fireTornado'];
 
   assert.equal(applyUpgrade(run, 'fireTornado'), true);
-  assert.ok(!eligibleUpgrades(run).some(({ id }) => id === 'thermalShock'));
+  assert.ok(eligibleUpgrades(run).some(({ id }) => id === 'thermalShock'));
 
   run.state = 'levelUp';
   run.pendingLevelUps = 1;
   run.currentUpgradeChoices = ['thermalShock'];
-  assert.equal(applyUpgrade(run, 'thermalShock'), false);
-  assert.equal(run.unlockedReactions.thermalShock, undefined);
+  assert.equal(applyUpgrade(run, 'thermalShock'), true);
+  assert.equal(run.unlockedReactions.thermalShock, true);
+  assert.deepEqual(run.fusionSlots, ['fireTornado', 'thermalShock']);
+});
+
+test('a weapon can choose only one behavior mutation while other weapons remain open', () => {
+  const run = createRun({ state: 'levelUp' });
+  run.player.level = 6;
+  run.upgrades.windBladeUnlock = 1;
+  run.weapons.windBlade = { ...CONFIG.weapons.windBlade, cooldownRemaining: 0, level: 1 };
+  run.pendingLevelUps = 1;
+  run.currentUpgradeChoices = ['fireFlameOrbit'];
+
+  assert.equal(applyUpgrade(run, 'fireFlameOrbit'), true);
+  assert.equal(run.weaponMutations.fireball, 'flameOrbit');
+
+  const eligibleIds = eligibleUpgrades(run).map(({ id }) => id);
+  assert.ok(!eligibleIds.includes('fireIgnitionMark'));
+  assert.ok(!eligibleIds.includes('firePhoenixSplit'));
+  assert.ok(eligibleIds.includes('windVacuumBlade'));
+});
+
+test('repeatable mastery choices keep XP useful after one-time upgrades are exhausted', () => {
+  const run = createRun({ state: 'levelUp' });
+  for (const upgrade of CONFIG.upgrades) {
+    if (!upgrade.repeatable) run.upgrades[upgrade.id] = 1;
+  }
+  run.pendingLevelUps = 2;
+
+  const choices = createUpgradeChoices(run);
+  assert.equal(choices.length, 3);
+  assert.ok(choices.every(({ repeatable }) => repeatable));
+
+  run.currentUpgradeChoices = ['elementalOverdrive'];
+  assert.equal(applyUpgrade(run, 'elementalOverdrive'), true);
+  assert.equal(run.upgrades.elementalOverdrive, 1);
+  assert.equal(run.masteries.elementalOverdrive, 1);
+
+  run.currentUpgradeChoices = ['elementalOverdrive'];
+  assert.equal(applyUpgrade(run, 'elementalOverdrive'), true);
+  assert.equal(run.upgrades.elementalOverdrive, 2);
+  assert.equal(run.masteries.elementalOverdrive, 2);
+  assert.equal(run.state, 'running');
 });
 
 test('reaction selection unlocks Thermal Shock exactly once', () => {
@@ -257,7 +322,8 @@ test('restart creates a clean running session without retaining transient state'
   oldRun.particles.push({ id: 4 });
   oldRun.reactions.push({ id: 5 });
   oldRun.unlockedReactions.fireTornado = true;
-  oldRun.reactionSlot = 'fireTornado';
+  oldRun.fusionSlots.push('fireTornado');
+  oldRun.weaponMutations.fireball = 'flameOrbit';
   oldRun.reactionTriggerCooldowns.thermalShock = new Map([[99, 12]]);
   oldRun.player.health = 1;
   oldRun.player.level = 8;
@@ -280,7 +346,8 @@ test('restart creates a clean running session without retaining transient state'
   assert.deepEqual(restarted.particles, []);
   assert.deepEqual(restarted.reactions, []);
   assert.deepEqual(restarted.unlockedReactions, {});
-  assert.equal(restarted.reactionSlot, null);
+  assert.deepEqual(restarted.fusionSlots, []);
+  assert.deepEqual(restarted.weaponMutations, {});
   assert.deepEqual(restarted.reactionTriggerCooldowns, {});
   assert.deepEqual(restarted.currentUpgradeChoices, []);
   assert.equal(restarted.pendingLevelUps, 0);

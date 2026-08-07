@@ -1,6 +1,6 @@
 import { CONFIG } from '../data/config.js';
 import { getEncounterPlan } from './director.js';
-import { damagePlayer, gainXp } from './model.js';
+import { damagePlayer, gainBurstCharge, gainXp } from './model.js';
 import { nextRandom } from './random.js';
 
 function clamp(value, minimum, maximum) {
@@ -42,32 +42,38 @@ export function stepParticles(run, dt) {
 export function stepPlayer(run, input, dt, config = CONFIG) {
   const length = Math.hypot(input.x, input.y);
   const scale = length > 1 ? 1 / length : 1;
+  const burstMultiplier = run.time < run.burst.activeUntil ? config.burst.moveSpeedMultiplier : 1;
   run.player.x = clamp(
-    run.player.x + input.x * scale * run.player.speed * dt,
+    run.player.x + input.x * scale * run.player.speed * burstMultiplier * dt,
     run.player.radius,
     config.world.width - run.player.radius,
   );
   run.player.y = clamp(
-    run.player.y + input.y * scale * run.player.speed * dt,
+    run.player.y + input.y * scale * run.player.speed * burstMultiplier * dt,
     run.player.radius,
     config.world.height - run.player.radius,
   );
 }
 
-export function spawnEnemy(run, type, x, y, config = CONFIG) {
+export function spawnEnemy(run, type, x, y, config = CONFIG, modifiers = {}) {
   const definition = config.enemies[type];
   if (!definition || run.enemies.length >= config.limits.enemies) return null;
+  const elite = Boolean(modifiers.elite);
+  const healthScale = (modifiers.healthScale ?? 1) * (elite ? 3.25 : 1);
+  const damageScale = (modifiers.damageScale ?? 1) * (elite ? 1.65 : 1);
+  const speedScale = modifiers.speedScale ?? 1;
   const enemy = {
     id: run.nextEntityId++,
     type,
     x,
     y,
-    radius: definition.radius,
-    health: definition.health,
-    maxHealth: definition.health,
-    speed: definition.speed,
-    damage: definition.damage,
-    xp: definition.xp,
+    radius: definition.radius * (elite ? 1.28 : 1),
+    health: definition.health * healthScale,
+    maxHealth: definition.health * healthScale,
+    speed: definition.speed * speedScale * (elite ? 1.04 : 1),
+    damage: definition.damage * damageScale,
+    xp: definition.xp * (elite ? 6 : 1),
+    elite,
     slowMultiplier: 1,
     slowedUntil: 0,
     dead: false,
@@ -140,28 +146,94 @@ function nearestEnemy(run) {
   return nearest;
 }
 
+function nearestEnemyFrom(run, x, y, excludedId = null) {
+  let nearest = null;
+  let nearestDistanceSquared = Infinity;
+  for (const enemy of run.enemies) {
+    if (enemy.dead || enemy.id === excludedId) continue;
+    const dx = enemy.x - x;
+    const dy = enemy.y - y;
+    const distanceSquared = dx * dx + dy * dy;
+    if (distanceSquared < nearestDistanceSquared) {
+      nearest = enemy;
+      nearestDistanceSquared = distanceSquared;
+    }
+  }
+  return nearest;
+}
+
 function fireWeapon(run, weapon, target, config) {
   const baseAngle = Math.atan2(target.y - run.player.y, target.x - run.player.x);
-  for (let index = 0; index < weapon.projectiles; index += 1) {
+  const burstDamage = run.time < run.burst.activeUntil ? config.burst.damageMultiplier : 1;
+  const behavior = run.weaponMutations[weapon.id] ?? null;
+  const projectileCount = behavior === 'glacierPath'
+    ? Math.max(1, weapon.projectiles - 1)
+    : weapon.projectiles;
+  for (let index = 0; index < projectileCount; index += 1) {
     if (run.projectiles.length >= config.limits.projectiles) break;
-    const angle = baseAngle + (index - (weapon.projectiles - 1) / 2) * 0.16;
-    run.projectiles.push({
+    const angle = baseAngle + (index - (projectileCount - 1) / 2) * 0.16;
+    const speedMultiplier = behavior === 'mirrorIce' ? 0.82 : 1;
+    const damageMultiplier = {
+      flameOrbit: 0.72,
+      ignitionMark: 0.7,
+      phoenixSplit: 0.9,
+      vacuumBlade: 0.78,
+      spiralStorm: 0.82,
+      frostPrison: 0.72,
+      glacierPath: 0.82,
+      mirrorIce: 0.82,
+    }[behavior] ?? 1;
+    const projectile = {
       id: run.nextEntityId++,
       x: run.player.x,
       y: run.player.y,
-      vx: Math.cos(angle) * weapon.speed,
-      vy: Math.sin(angle) * weapon.speed,
+      vx: Math.cos(angle) * weapon.speed * speedMultiplier,
+      vy: Math.sin(angle) * weapon.speed * speedMultiplier,
       radius: weapon.radius,
       lifetime: weapon.lifetime,
-      damage: weapon.damage,
+      initialLifetime: weapon.lifetime,
+      age: 0,
+      damage: weapon.damage * run.player.damageMultiplier * burstDamage * damageMultiplier,
       pierceRemaining: weapon.pierce,
       weaponId: weapon.id,
       element: weapon.element,
+      behavior,
       slowMultiplier: weapon.slowMultiplier,
       slowDuration: weapon.slowDuration,
       hitIds: new Set(),
       expired: false,
-    });
+    };
+
+    if (behavior === 'flameOrbit') {
+      projectile.orbitAngle = angle;
+      projectile.orbitRadius = 58 + index * 13;
+      projectile.angularSpeed = 5.2;
+      projectile.x += Math.cos(angle) * projectile.orbitRadius;
+      projectile.y += Math.sin(angle) * projectile.orbitRadius;
+      projectile.radius += 4;
+      projectile.pierceRemaining = 12;
+      projectile.lifetime = 1.45;
+    } else if (behavior === 'vacuumBlade') {
+      projectile.returnAt = weapon.lifetime * 0.46;
+      projectile.pierceRemaining += 2;
+    } else if (behavior === 'spiralStorm') {
+      projectile.angularVelocity = index % 2 === 0 ? 3.2 : -3.2;
+      projectile.radius += 5;
+    } else if (behavior === 'glacierPath') {
+      projectile.trailTimer = 0;
+      projectile.pierceRemaining += 1;
+    }
+    run.projectiles.push(projectile);
+
+    if (behavior === 'windEcho' && run.projectiles.length < config.limits.projectiles) {
+      run.projectiles.push({
+        ...projectile,
+        id: run.nextEntityId++,
+        damage: projectile.damage * 0.68,
+        delay: 0.22,
+        hitIds: new Set(),
+      });
+    }
   }
 }
 
@@ -171,7 +243,9 @@ export function stepWeapons(run, dt, config = CONFIG) {
     weapon.cooldownRemaining = Math.max(0, weapon.cooldownRemaining - dt);
     if (!target || weapon.cooldownRemaining > 0) continue;
     fireWeapon(run, weapon, target, config);
-    weapon.cooldownRemaining = weapon.cooldown;
+    weapon.cooldownRemaining = weapon.cooldown
+      * (run.time < run.burst.activeUntil ? config.burst.cooldownMultiplier : 1)
+      * (run.weaponMutations[weapon.id] === 'windEcho' ? 1.16 : 1);
     run.stats.attacks += 1;
   }
 }
@@ -181,18 +255,22 @@ function killEnemy(run, enemy, config) {
   enemy.dead = true;
   for (const cooldowns of Object.values(run.reactionTriggerCooldowns)) cooldowns.delete(enemy.id);
   run.stats.kills += 1;
+  if (enemy.elite) run.stats.eliteKills += 1;
+  gainBurstCharge(run, config.burst.killCharge + (enemy.elite ? config.burst.eliteCharge : 0), config);
   run.stats.xpProduced += enemy.xp;
   if (run.stats.milestones.firstKillAt === null) run.stats.milestones.firstKillAt = run.time;
   run.stats.killsByType[enemy.type] = (run.stats.killsByType[enemy.type] ?? 0) + 1;
-  run.events.push({ type: 'kill', x: enemy.x, y: enemy.y, enemyType: enemy.type });
-  emitParticles(run, enemy.x, enemy.y, '#76f7c8', 8, config);
+  run.events.push({ type: 'kill', x: enemy.x, y: enemy.y, enemyType: enemy.type, elite: enemy.elite });
+  emitParticles(run, enemy.x, enemy.y, enemy.elite ? '#ffd166' : '#76f7c8', enemy.elite ? 18 : 8, config);
   if (run.xpOrbs.length < config.limits.xpOrbs) {
+    const tier = enemy.elite ? 'elite' : enemy.xp >= 15 ? 'rare' : 'small';
     run.xpOrbs.push({
       id: run.nextEntityId++,
       x: enemy.x,
       y: enemy.y,
-      radius: 5,
+      radius: tier === 'elite' ? 10 : tier === 'rare' ? 7 : 5,
       value: enemy.xp,
+      tier,
       collected: false,
     });
   } else if (run.xpOrbs.length > 0) {
@@ -221,6 +299,7 @@ function triggerBurstReaction(run, reactionId, triggerEnemy, config) {
   cooldowns.set(triggerEnemy.id, run.time + definition.triggerCooldown);
 
   run.stats.reactionActivations[reactionId] = (run.stats.reactionActivations[reactionId] ?? 0) + 1;
+  gainBurstCharge(run, config.burst.reactionCharge, config);
   run.events.push({
     type: 'reactionActivate',
     reactionId,
@@ -261,10 +340,48 @@ function triggerBurstReaction(run, reactionId, triggerEnemy, config) {
 }
 
 export function stepProjectiles(run, dt, config = CONFIG) {
+  const pendingProjectiles = [];
   for (const projectile of run.projectiles) {
     if (projectile.expired) continue;
-    projectile.x += projectile.vx * dt;
-    projectile.y += projectile.vy * dt;
+    if ((projectile.delay ?? 0) > 0) {
+      projectile.delay -= dt;
+      continue;
+    }
+    projectile.age = (projectile.age ?? 0) + dt;
+    if (projectile.behavior === 'flameOrbit') {
+      projectile.orbitAngle += projectile.angularSpeed * dt;
+      projectile.x = run.player.x + Math.cos(projectile.orbitAngle) * projectile.orbitRadius;
+      projectile.y = run.player.y + Math.sin(projectile.orbitAngle) * projectile.orbitRadius;
+    } else {
+      if (projectile.behavior === 'spiralStorm') {
+        const angle = projectile.angularVelocity * dt;
+        const vx = projectile.vx * Math.cos(angle) - projectile.vy * Math.sin(angle);
+        projectile.vy = projectile.vx * Math.sin(angle) + projectile.vy * Math.cos(angle);
+        projectile.vx = vx;
+      } else if (projectile.behavior === 'vacuumBlade' && projectile.age >= projectile.returnAt) {
+        const dx = run.player.x - projectile.x;
+        const dy = run.player.y - projectile.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        const speed = Math.hypot(projectile.vx, projectile.vy);
+        projectile.vx = (dx / distance) * speed;
+        projectile.vy = (dy / distance) * speed;
+      }
+      projectile.x += projectile.vx * dt;
+      projectile.y += projectile.vy * dt;
+    }
+
+    if (projectile.behavior === 'glacierPath') {
+      projectile.trailTimer = (projectile.trailTimer ?? 0) - dt;
+      if (projectile.trailTimer <= 0) {
+        projectile.trailTimer = 0.14;
+        emitParticles(run, projectile.x, projectile.y, '#a9efff', 2, config);
+        for (const enemy of run.enemies) {
+          if (enemy.dead || Math.hypot(enemy.x - projectile.x, enemy.y - projectile.y) > 42 + enemy.radius) continue;
+          enemy.slowMultiplier = Math.min(enemy.slowMultiplier, 0.48);
+          enemy.slowedUntil = Math.max(enemy.slowedUntil, run.time + 0.65);
+        }
+      }
+    }
     projectile.lifetime -= dt;
     if (projectile.lifetime <= 0) {
       projectile.expired = true;
@@ -288,10 +405,80 @@ export function stepProjectiles(run, dt, config = CONFIG) {
         enemy.slowMultiplier = projectile.slowMultiplier;
         enemy.slowedUntil = Math.max(enemy.slowedUntil, run.time + projectile.slowDuration);
       }
+      if (projectile.behavior === 'frostPrison') {
+        for (const nearby of run.enemies) {
+          if (nearby.dead || Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y) > 72 + nearby.radius) continue;
+          nearby.slowMultiplier = Math.min(nearby.slowMultiplier, 0.16);
+          nearby.slowedUntil = Math.max(nearby.slowedUntil, run.time + 1.25);
+        }
+        run.events.push({ type: 'mutation', behavior: 'frostPrison', x: enemy.x, y: enemy.y });
+      } else if (projectile.behavior === 'ignitionMark') {
+        for (const nearby of run.enemies) {
+          if (nearby.dead || nearby.id === enemy.id
+            || Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y) > 68 + nearby.radius) continue;
+          const blastDamage = projectile.damage * 0.55;
+          nearby.health -= blastDamage;
+          run.stats.damageByWeapon[projectile.weaponId] =
+            (run.stats.damageByWeapon[projectile.weaponId] ?? 0) + blastDamage;
+          if (nearby.health <= 0) killEnemy(run, nearby, config);
+        }
+        run.events.push({ type: 'mutation', behavior: 'ignitionMark', x: enemy.x, y: enemy.y });
+      } else if (projectile.behavior === 'vacuumBlade') {
+        const dx = run.player.x - enemy.x;
+        const dy = run.player.y - enemy.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        enemy.x += (dx / distance) * Math.min(34, distance);
+        enemy.y += (dy / distance) * Math.min(34, distance);
+      }
       if (projectile.element === 'fire' && wasSlowed) {
         triggerBurstReaction(run, 'thermalShock', enemy, config);
       }
-      if (enemy.health <= 0) killEnemy(run, enemy, config);
+      const killedByHit = enemy.health <= 0;
+      if (killedByHit) killEnemy(run, enemy, config);
+      if (killedByHit && projectile.behavior === 'phoenixSplit') {
+        for (let splitIndex = 0; splitIndex < 2; splitIndex += 1) {
+          const splitTarget = nearestEnemyFrom(run, enemy.x, enemy.y, enemy.id);
+          if (!splitTarget) break;
+          const splitAngle = Math.atan2(splitTarget.y - enemy.y, splitTarget.x - enemy.x)
+            + (splitIndex === 0 ? -0.12 : 0.12);
+          pendingProjectiles.push({
+            ...projectile,
+            id: run.nextEntityId++,
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(splitAngle) * 620,
+            vy: Math.sin(splitAngle) * 620,
+            radius: Math.max(4, projectile.radius * 0.7),
+            lifetime: 0.55,
+            age: 0,
+            damage: projectile.damage * 0.52,
+            behavior: 'phoenixEmber',
+            pierceRemaining: 0,
+            hitIds: new Set(),
+            expired: false,
+          });
+        }
+      } else if (!killedByHit && projectile.behavior === 'mirrorIce' && !projectile.refracted) {
+        const nextTarget = nearestEnemyFrom(run, enemy.x, enemy.y, enemy.id);
+        if (nextTarget) {
+          const angle = Math.atan2(nextTarget.y - enemy.y, nextTarget.x - enemy.x);
+          pendingProjectiles.push({
+            ...projectile,
+            id: run.nextEntityId++,
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(angle) * 440,
+            vy: Math.sin(angle) * 440,
+            lifetime: 0.75,
+            age: 0,
+            damage: projectile.damage * 0.72,
+            refracted: true,
+            pierceRemaining: 0,
+            hitIds: new Set([enemy.id]),
+            expired: false,
+          });
+        }
+      }
       if (projectile.pierceRemaining <= 0) {
         projectile.expired = true;
         break;
@@ -300,11 +487,13 @@ export function stepProjectiles(run, dt, config = CONFIG) {
     }
   }
 
+  const available = Math.max(0, config.limits.projectiles - run.projectiles.length);
+  run.projectiles.push(...pendingProjectiles.slice(0, available));
   run.projectiles = run.projectiles.filter(({ expired }) => !expired);
   run.enemies = run.enemies.filter(({ dead }) => !dead);
 }
 
-export function stepXpOrbs(run, dt) {
+export function stepXpOrbs(run, dt, config = CONFIG) {
   let collectedXp = 0;
   const previousLevel = run.player.level;
   for (const orb of run.xpOrbs) {
@@ -312,7 +501,9 @@ export function stepXpOrbs(run, dt) {
     const dx = run.player.x - orb.x;
     const dy = run.player.y - orb.y;
     const distance = Math.hypot(dx, dy);
-    if (distance > run.player.pickupRadius) continue;
+    const pickupRadius = run.player.pickupRadius
+      * (run.time < run.burst.activeUntil ? config.burst.pickupRadiusMultiplier : 1);
+    if (distance > pickupRadius) continue;
 
     if (distance <= run.player.radius + orb.radius + 4) {
       orb.collected = true;
@@ -328,6 +519,7 @@ export function stepXpOrbs(run, dt) {
   run.xpOrbs = run.xpOrbs.filter(({ collected }) => !collected);
   if (collectedXp > 0) {
     run.stats.xpCollected += collectedXp;
+    gainBurstCharge(run, collectedXp * config.burst.xpChargePerPoint, config);
     if (run.stats.milestones.firstXpAt === null) run.stats.milestones.firstXpAt = run.time;
     gainXp(run, collectedXp);
     if (run.player.level > previousLevel) run.events.push({ type: 'levelUp', level: run.player.level });
@@ -362,6 +554,7 @@ export function ensureReactions(run, config = CONFIG) {
     });
     run.stats.reactionActivations[reactionId] =
       (run.stats.reactionActivations[reactionId] ?? 0) + 1;
+    gainBurstCharge(run, config.burst.reactionCharge, config);
   }
 }
 
@@ -413,7 +606,7 @@ function chooseEnemyType(run, mix) {
   return mix.at(-1).id;
 }
 
-function spawnAtEncounterEdge(run, type, config) {
+function spawnAtEncounterEdge(run, type, config, modifiers = {}) {
   const definition = config.enemies[type];
   const minX = definition.radius;
   const maxX = config.world.width - definition.radius;
@@ -427,7 +620,7 @@ function spawnAtEncounterEdge(run, type, config) {
     const x = clamp(run.player.x + Math.cos(angle) * distance, minX, maxX);
     const y = clamp(run.player.y + Math.sin(angle) * distance, minY, maxY);
     if (Math.hypot(x - run.player.x, y - run.player.y) >= minimumSafeDistance) {
-      return spawnEnemy(run, type, x, y, config);
+      return spawnEnemy(run, type, x, y, config, modifiers);
     }
   }
 
@@ -444,10 +637,18 @@ function spawnAtEncounterEdge(run, type, config) {
       ? candidate
       : farthest
   ));
-  return spawnEnemy(run, type, fallback.x, fallback.y, config);
+  return spawnEnemy(run, type, fallback.x, fallback.y, config, modifiers);
 }
 
 function stepDirector(run, dt, config) {
+  if (run.time >= run.nextWorldRuleAt) {
+    const rules = ['surgingHorde', 'hardenedShell', 'volatilePursuit'];
+    const rule = rules[run.worldRuleLevel % rules.length];
+    run.worldRuleLevel += 1;
+    run.worldRules.push(rule);
+    run.nextWorldRuleAt += 240;
+    run.events.push({ type: 'worldRule', rule, level: run.worldRuleLevel });
+  }
   run.spawnTimer -= dt;
   if (run.spawnTimer > 0) return;
   const plan = getEncounterPlan(run, config);
@@ -456,7 +657,17 @@ function stepDirector(run, dt, config) {
     return;
   }
   for (let index = 0; index < plan.spawnCount; index += 1) {
-    spawnAtEncounterEdge(run, chooseEnemyType(run, plan.mix), config);
+    const elite = plan.elite && index === 0;
+    const enemy = spawnAtEncounterEdge(run, chooseEnemyType(run, plan.mix), config, {
+      healthScale: plan.healthScale * (1 + run.worldRuleLevel * 0.12),
+      damageScale: plan.damageScale * (1 + run.worldRuleLevel * 0.08),
+      speedScale: plan.speedScale,
+      elite,
+    });
+    if (enemy?.elite) {
+      run.events.push({ type: 'eliteSpawn', x: enemy.x, y: enemy.y, enemyType: enemy.type });
+      run.nextEliteAt = run.time + Math.max(78, 125 - run.time * 0.025);
+    }
   }
   run.spawnTimer = plan.spawnInterval;
 }
@@ -476,7 +687,7 @@ export function stepSimulation(run, { dt, input = { x: 0, y: 0 }, config = CONFI
   stepWeapons(run, dt, config);
   stepProjectiles(run, dt, config);
   stepReactions(run, dt, config);
-  stepXpOrbs(run, dt);
+  stepXpOrbs(run, dt, config);
   stepParticles(run, dt);
   recordEntityPeaks(run);
 }

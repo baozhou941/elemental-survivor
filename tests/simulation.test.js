@@ -33,6 +33,22 @@ test('player movement is normalized and clamped inside world bounds', () => {
   assert.equal(run.player.y, CONFIG.player.radius);
 });
 
+test('active elemental burst accelerates movement and weapon cadence', () => {
+  const run = createRun({ state: 'running' });
+  const startX = run.player.x;
+  run.burst.activeUntil = 10;
+  spawnEnemy(run, 'brute', run.player.x + 300, run.player.y);
+
+  stepPlayer(run, { x: 1, y: 0 }, 1);
+  stepWeapons(run, 1 / 60);
+
+  assert.ok(Math.abs(
+    (run.player.x - startX) - CONFIG.player.speed * CONFIG.burst.moveSpeedMultiplier,
+  ) < 1e-9);
+  assert.equal(run.weapons.fireball.cooldownRemaining, CONFIG.weapons.fireball.cooldown * CONFIG.burst.cooldownMultiplier);
+  assert.equal(run.projectiles[0].damage, CONFIG.weapons.fireball.damage * CONFIG.burst.damageMultiplier);
+});
+
 test('enemy kinds preserve distinct health, pace, and swift lateral movement', () => {
   const createEnemyRun = (type) => {
     const run = createRun({ state: 'running' });
@@ -86,6 +102,41 @@ test('Fireball automatically aims at the nearest target and obeys cooldown', () 
 
   stepWeapons(run, 0.2);
   assert.equal(run.projectiles.length, 1);
+});
+
+test('weapon mutations change combat behavior instead of only changing the upgrade card', () => {
+  const orbitRun = createRun({ state: 'running' });
+  orbitRun.weaponMutations.fireball = 'flameOrbit';
+  spawnEnemy(orbitRun, 'brute', orbitRun.player.x + 200, orbitRun.player.y);
+  stepWeapons(orbitRun, 1 / 60);
+  assert.equal(orbitRun.projectiles[0].behavior, 'flameOrbit');
+  const orbitStartX = orbitRun.projectiles[0].x;
+  stepProjectiles(orbitRun, 0.1);
+  assert.notEqual(orbitRun.projectiles[0].x, orbitStartX);
+
+  const echoRun = createRun({ state: 'running' });
+  echoRun.weapons = { windBlade: { ...CONFIG.weapons.windBlade, cooldownRemaining: 0, level: 1 } };
+  echoRun.weaponMutations.windBlade = 'windEcho';
+  spawnEnemy(echoRun, 'brute', echoRun.player.x + 200, echoRun.player.y);
+  stepWeapons(echoRun, 1 / 60);
+  assert.equal(echoRun.projectiles.length, 2);
+  assert.ok(echoRun.projectiles.some(({ delay }) => delay > 0));
+  assert.ok(echoRun.weapons.windBlade.cooldownRemaining > CONFIG.weapons.windBlade.cooldown);
+});
+
+test('Frost Prison turns an ice hit into local crowd control', () => {
+  const run = createRun({ state: 'running' });
+  run.weapons = { iceShard: { ...CONFIG.weapons.iceShard, cooldownRemaining: 0, level: 1 } };
+  run.weaponMutations.iceShard = 'frostPrison';
+  const target = spawnEnemy(run, 'brute', run.player.x + 25, run.player.y);
+  const nearby = spawnEnemy(run, 'brute', target.x + 35, target.y);
+
+  stepWeapons(run, 1 / 60);
+  stepProjectiles(run, 0.05);
+
+  assert.ok(target.slowMultiplier <= 0.2);
+  assert.ok(nearby.slowMultiplier <= 0.2);
+  assert.ok(nearby.slowedUntil >= 1);
 });
 
 test('projectiles expire, while a lethal hit records damage and drops XP', () => {
@@ -193,6 +244,22 @@ test('XP orbs attract inside pickup range, collect near the player, and can leve
   assert.equal(run.state, 'levelUp');
 });
 
+test('kills and collected elemental energy charge the burst gauge', () => {
+  const run = createRun({ state: 'running' });
+  const enemy = spawnEnemy(run, 'swift', run.player.x + 25, run.player.y);
+  stepWeapons(run, 1 / 60);
+  stepProjectiles(run, 0.05);
+  assert.equal(run.burst.charge, CONFIG.burst.killCharge);
+
+  run.xpOrbs[0].x = run.player.x;
+  run.xpOrbs[0].y = run.player.y;
+  stepXpOrbs(run, 1 / 60);
+  assert.equal(
+    run.burst.charge,
+    CONFIG.burst.killCharge + CONFIG.enemies.swift.xp * CONFIG.burst.xpChargePerPoint,
+  );
+});
+
 test('simultaneously collected XP is conserved when the first orb levels up', () => {
   const run = createRun({ state: 'running' });
   run.xpOrbs.push(
@@ -222,6 +289,21 @@ test('XP rewards merge instead of disappearing when the orb cap is reached', () 
 
   assert.equal(run.xpOrbs.length, 1);
   assert.equal(run.xpOrbs[0].value, 7 + CONFIG.enemies.swift.xp);
+});
+
+test('elite kills drop a visually distinct high-value elemental core', () => {
+  const run = createRun({ state: 'running' });
+  const enemy = spawnEnemy(run, 'swift', run.player.x + 25, run.player.y);
+  enemy.elite = true;
+  enemy.xp = 30;
+  enemy.health = 1;
+
+  stepWeapons(run, 1 / 60);
+  stepProjectiles(run, 0.05);
+
+  assert.equal(run.stats.eliteKills, 1);
+  assert.equal(run.xpOrbs[0].tier, 'elite');
+  assert.ok(run.xpOrbs[0].radius > 5);
 });
 
 test('Fire Tornado creates one active reaction and respects per-target hit cadence', () => {
@@ -420,4 +502,17 @@ test('encounter spawns keep a safe distance when the player is in a world corner
     run.enemies.every((enemy) => Math.hypot(enemy.x - run.player.x, enemy.y - run.player.y) >= 300),
     'an encounter enemy must not clamp onto the player at a world edge',
   );
+});
+
+test('endless encounter applies scaling and promotes milestone enemies to elites', () => {
+  const run = createRun({ state: 'running', seed: 3 });
+  run.time = 240;
+  run.spawnTimer = 0;
+
+  stepSimulation(run, { dt: 1 / 60, input: { x: 0, y: 0 }, config: CONFIG });
+
+  const elite = run.enemies.find(({ elite: isElite }) => isElite);
+  assert.ok(elite);
+  assert.ok(elite.maxHealth > CONFIG.enemies[elite.type].health * 3);
+  assert.ok(run.nextEliteAt > run.time);
 });

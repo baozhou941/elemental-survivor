@@ -1,8 +1,8 @@
-# V0.1 Art Bible
+# Elemental Survivor Art Bible（V0.7）
 
-## Temporary direction
+## Final direction
 
-V0.1 uses a restrained Neon Elemental presentation as a low-cost readability baseline: a dark desaturated arena, a bright player core, strongly separated element hues, and simple geometric silhouettes. This is provisional until the three requested directions receive external art review.
+The production direction is **Elemental Sigil Minimalism**: 55% Minimal Premium, 35% Neon Elemental, and 10% Arcane Fantasy. The visual foundation is a dark desaturated arena, a bright crystalline player core, strongly separated element hues, geometric threat silhouettes, and restrained arcane sigils. This mix keeps long-session readability and Canvas performance while giving elemental reactions a recognizable identity.
 
 ## Direction candidates for review
 
@@ -12,15 +12,19 @@ V0.1 uses a restrained Neon Elemental presentation as a low-cost readability bas
 | Arcane Fantasy | Strong world identity, symbols, and creature potential | Highest asset and animation cost; intricate details can reduce readability | Moderate to high |
 | Minimal Premium | Clean silhouettes, excellent clarity, and controlled fatigue | May feel emotionally cool or insufficiently magical | Low |
 
-No direction is final in V0.1. The external art review must compare production cost, VFX difficulty, performance, distinctiveness, long-session fatigue, and gameplay fit before V0.2 chooses one.
+The comparison remains as production history; V0.7 has selected the mixed direction above. New assets must match it rather than independently inventing another style.
+
+## Visual hierarchy
+
+Every frame follows: **player > elite/Boss > normal enemies > player skills > XP**. Brightness, edge contrast, size, motion, and glow are allocated in that order. XP may become brighter only inside the pickup neighborhood; ordinary attacks must not outshine elites or the player; decorative particles degrade before gameplay information.
 
 ## Shape language
 
-- Player: concentric circle/kite core with a persistent white center. The broken outer ring and dark core retain the last movement direction; motion uses a tiny forward offset rather than a trail.
+- Player: faceted crystal core with a persistent white center, forward facet, and restrained outer sigil ring. The core retains the last movement direction; equipped Fire, Wind, and Ice appear as small distinct orbiting sigils rather than a color wash.
 - Chaser: forward-pointing notched diamond with an internal chevron.
 - Swift: narrow notched dart with two internal speed lines.
 - Brute: broad, flattened hexagonal silhouette with two internal armor plates.
-- XP: small diamond shards with a clear inward attraction trail.
+- XP: common energy uses a small white-cyan hollow diamond; rare energy uses a larger gold hexagonal crystal; elite energy uses a bright multi-ring core. Attraction uses a short curved trail and never hides the player.
 - Harmful areas: warm outlined boundaries with a readable pre-impact phase.
 - Beneficial or player-owned areas: solid elemental edge plus softer interior motion.
 
@@ -41,6 +45,11 @@ Color is never the only differentiator; shape and motion must communicate the sa
 - Enemy identity colors and silhouettes remain visible while slowed. Ice slow is drawn as four cyan edge ticks instead of replacing the body color.
 - Player invulnerability modulates white-core opacity instead of recoloring the whole body. The existing short red-white directional arc communicates the damage source.
 - Character gameplay radii are not changed by visual extensions; darts, notches, and rings are rendering-only.
+- Elite identity uses a gold outer edge and pulse ring while preserving the base enemy silhouette and internal threat glyph.
+
+## Element burst
+
+The charged state adds a restrained gold-white cadence to the player's sigil ring. Activation expands as a hexagonal shock ring followed by a six-second warm core pulse. It must communicate a tactical window without becoming a full-screen clear, hiding enemy telegraphs, or changing collision radii.
 
 ## Layering and readability
 
@@ -56,4 +65,4 @@ Movement and projectiles favor smooth curves. Enemy hit flash is short enough to
 
 ## Performance limits
 
-V0.1 uses Canvas primitives and cached gradients where useful. Decorative particle counts are capped and degrade before gameplay entities. Expensive full-screen blur and uncontrolled additive layering are excluded.
+V0.7 uses Canvas primitives and cached gradients where useful. Decorative particle counts are capped and degrade before gameplay entities. Expensive full-screen blur, uncontrolled additive layering, texture spam, and per-frame image allocation are excluded. DPR remains capped and the ordinary 3-minute stress target is approximately 60 FPS with no sustained hitching.

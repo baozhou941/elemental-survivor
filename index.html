@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#070b18">
-    <meta name="description" content="元素构筑驱动的网页 Roguelite 游戏原型。">
+    <meta name="description" content="元素构筑驱动的无尽生存网页 Roguelite 游戏。">
     <title>元素幸存者 · Elemental Survivor</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
@@ -13,6 +13,7 @@
       <canvas id="game-canvas" aria-label="元素幸存者战场"></canvas>
 
       <section id="hud" class="hud" aria-label="游戏状态" hidden>
+        <div id="event-banner" class="event-banner" aria-live="polite" hidden></div>
         <div class="hud__top">
           <div class="health" aria-label="生命值">
             <span class="hud__label">生命</span>
@@ -29,25 +30,34 @@
           <div id="xp-fill" class="xp-bar__fill"></div>
         </div>
         <div id="weapon-strip" class="weapon-strip" aria-label="已获得能力"></div>
+        <button id="burst-button" class="burst-button" type="button" aria-label="释放元素爆发" disabled>
+          <span class="burst-button__well"><span id="burst-fill" class="burst-button__fill"></span></span>
+          <strong id="burst-value">0</strong>
+          <small>爆发</small>
+        </button>
       </section>
 
       <section id="title-panel" class="panel title-panel">
         <p class="eyebrow">ELEMENTAL ROGUELITE</p>
         <h1>元素幸存者</h1>
-        <p class="title-panel__lead">驾驭元素，撕开怪潮。每次升级都改变这一局。</p>
+        <p class="title-panel__lead">在不断增强的怪潮中活得更久。收集全部元素，再让它们走向不同的蜕变。</p>
         <div class="control-hint" aria-label="操作说明">
-          <span class="control-hint__desktop"><kbd>WASD</kbd> / <kbd>方向键</kbd></span>
-          <span class="control-hint__touch">左下角摇杆</span>
-          <strong>移动 · 自动攻击</strong>
+          <span class="control-hint__desktop"><kbd>WASD</kbd> / <kbd>方向键</kbd> · <kbd>空格</kbd>/<kbd>E</kbd> 爆发</span>
+          <span class="control-hint__touch">左下摇杆移动 · 右下按钮爆发</span>
+          <strong>自动攻击 · 无尽生存</strong>
         </div>
         <button id="start-button" class="primary-button" type="button">开始觉醒</button>
-        <p class="small-print">坚持 3 分钟，试着让火与风相遇。</p>
+        <p class="small-print">没有终点：融合槽最多 2 个，蜕变与精通会持续塑造你的 Build。</p>
+        <section class="leaderboard-card" aria-labelledby="title-leaderboard-heading">
+          <h2 id="title-leaderboard-heading">本地生存榜</h2>
+          <ol id="title-leaderboard" class="leaderboard-list"></ol>
+        </section>
       </section>
 
       <section id="upgrade-panel" class="panel upgrade-panel" aria-labelledby="upgrade-title" hidden>
         <p class="eyebrow">LEVEL UP</p>
         <h2 id="upgrade-title">选择元素蜕变</h2>
-        <p id="reaction-route-rule" class="upgrade-route-rule" hidden>反应路线：本局只能激活一种。首个完成的元素反应将锁定本局路线。</p>
+        <p id="reaction-route-rule" class="upgrade-route-rule">融合槽最多 2 个；武器蜕变彼此独立，选定后不可回头。</p>
         <div id="upgrade-choices" class="upgrade-choices"></div>
       </section>
 
@@ -62,6 +72,10 @@
         <p class="eyebrow eyebrow--danger">RUN ENDED</p>
         <h2 id="game-over-title">元素熄灭</h2>
         <div id="run-summary" class="run-summary"></div>
+        <section class="leaderboard-card leaderboard-card--game-over" aria-labelledby="game-over-leaderboard-heading">
+          <h3 id="game-over-leaderboard-heading">本地生存榜</h3>
+          <ol id="game-over-leaderboard" class="leaderboard-list"></ol>
+        </section>
         <button id="restart-button" class="primary-button" type="button">再来一局</button>
       </section>
 

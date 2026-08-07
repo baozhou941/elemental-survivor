@@ -62,12 +62,23 @@ test('director pauses spawning above its readable phase target', () => {
   assert.equal(aboveTarget.spawnCount, 0);
 });
 
-test('V0.1 director never schedules elites and respects the enemy cap', () => {
+test('endless director schedules readable elite milestones and respects the enemy cap', () => {
   const capped = planAt(180, CONFIG.limits.enemies, 200, 10);
   const almostTarget = planAt(180, 65, 200, 10);
+  const eliteWindow = planAt(240, 20, 250, 12);
 
   assert.equal(capped.canSpawn, false);
   assert.equal(capped.spawnCount, 0);
   assert.equal(capped.elite, false);
   assert.equal(almostTarget.spawnCount, 1);
+  assert.equal(eliteWindow.elite, true);
+});
+
+test('endless pressure keeps rising after the original three-minute demo window', () => {
+  const threeMinutes = planAt(180, 0, 200, 10);
+  const twelveMinutes = planAt(720, 0, 1200, 25);
+
+  assert.ok(twelveMinutes.targetEnemyCount > threeMinutes.targetEnemyCount);
+  assert.ok(twelveMinutes.healthScale > threeMinutes.healthScale);
+  assert.ok(twelveMinutes.damageScale > threeMinutes.damageScale);
 });

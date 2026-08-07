@@ -1,10 +1,11 @@
 import { CONFIG } from '../data/config.js';
 import { GameLoop } from '../core/game-loop.js';
-import { applyUpgrade, createRun, createUpgradeChoices, damagePlayer, restartRun } from '../core/model.js';
+import { activateBurst, applyUpgrade, createRun, createUpgradeChoices, damagePlayer, restartRun } from '../core/model.js';
 import { stepSimulation } from '../core/simulation.js';
 import { AudioSystem } from './audio.js';
 import { createFrameSampler, recordFrame } from './frame-telemetry.js';
 import { InputSystem } from './input.js';
+import { loadLeaderboard, recordLeaderboardEntry } from './leaderboard.js';
 import { Renderer } from './renderer.js';
 
 function formatTime(seconds) {
@@ -34,18 +35,32 @@ export class GameApp {
       xpHint: documentRoot.querySelector('#xp-hint'),
       weapons: documentRoot.querySelector('#weapon-strip'),
       touchStick: documentRoot.querySelector('#touch-stick'),
+      burstButton: documentRoot.querySelector('#burst-button'),
+      burstFill: documentRoot.querySelector('#burst-fill'),
+      burstValue: documentRoot.querySelector('#burst-value'),
+      eventBanner: documentRoot.querySelector('#event-banner'),
+      titleLeaderboard: documentRoot.querySelector('#title-leaderboard'),
+      gameOverLeaderboard: documentRoot.querySelector('#game-over-leaderboard'),
       status: documentRoot.querySelector('#status-region'),
     };
     this.run = createRun();
     this.frameSampler = createFrameSampler();
     this.renderer = new Renderer(this.elements.canvas, CONFIG);
     this.audio = new AudioSystem();
-    this.input = new InputSystem(window, () => this.togglePause(), this.elements.touchStick);
+    this.input = new InputSystem(
+      window,
+      () => this.togglePause(),
+      this.elements.touchStick,
+      () => this.triggerBurst(),
+      this.elements.burstButton,
+    );
     this.loop = new GameLoop({
       step: (dt) => this.step(dt),
       render: () => this.render(),
     });
     this.lastWeaponSignature = '';
+    this.bannerUntil = 0;
+    this.lastRecordedRunId = null;
     this.boundVisibility = () => {
       if (document.hidden && this.run.state === 'running') this.pause();
     };
@@ -61,6 +76,7 @@ export class GameApp {
     this.document.querySelector('#pause-button').addEventListener('click', () => this.pause());
     this.document.querySelector('#resume-button').addEventListener('click', () => this.resume());
     this.syncUi();
+    this.renderLeaderboard(this.elements.titleLeaderboard, loadLeaderboard());
     this.loop.start();
     document.documentElement.dataset.gameReady = 'ready';
     this.installTestSnapshot();
@@ -71,6 +87,8 @@ export class GameApp {
     this.run = createRun({ state: 'running', seed: Date.now(), runId: this.run.id });
     this.frameSampler = createFrameSampler();
     this.lastWeaponSignature = '';
+    this.bannerUntil = 0;
+    this.lastRecordedRunId = null;
     this.renderer.resetTransientEffects();
     this.input.clear();
     this.loop.resume();
@@ -83,6 +101,8 @@ export class GameApp {
     this.run = restartRun(this.run);
     this.frameSampler = createFrameSampler();
     this.lastWeaponSignature = '';
+    this.bannerUntil = 0;
+    this.lastRecordedRunId = null;
     this.renderer.resetTransientEffects();
     this.input.clear();
     this.loop.resume();
@@ -94,6 +114,7 @@ export class GameApp {
     stepSimulation(this.run, { dt, input: this.input.direction, config: CONFIG });
     this.renderer.react(this.run.events);
     this.audio.handle(this.run.events);
+    this.showBattleEvents(this.run.events);
     if (this.run.state === 'levelUp') this.openUpgradeSelection();
     else if (this.run.state === 'gameOver') this.openGameOver();
   }
@@ -107,8 +128,7 @@ export class GameApp {
   openUpgradeSelection() {
     this.input.clear();
     this.loop.pause();
-    const isFirstUpgrade = this.run.stats.upgradePicks.length === 0;
-    let choices = createUpgradeChoices(this.run, CONFIG);
+    const choices = createUpgradeChoices(this.run, CONFIG);
     if (choices.length === 0) {
       this.run.pendingLevelUps = 0;
       this.run.state = 'running';
@@ -118,21 +138,19 @@ export class GameApp {
     this.elements.upgradeChoices.replaceChildren(...choices.map((upgrade) => {
       const button = this.document.createElement('button');
       const isReaction = upgrade.kind === 'reaction';
+      const isMutation = upgrade.kind === 'mutation';
+      const isMastery = upgrade.rarity === 'mastery';
       button.type = 'button';
-      button.className = `upgrade-card upgrade-card--${isReaction ? 'reaction' : 'standard'}`;
+      button.className = `upgrade-card upgrade-card--${isReaction ? 'reaction' : isMutation ? 'mutation' : isMastery ? 'mastery' : 'standard'}`;
       button.dataset.upgradeId = upgrade.id;
-      const routePreview = isFirstUpgrade
-        ? upgrade.id === 'windBladeUnlock'
-          ? '路线预告：火 + 风 → 火焰龙卷'
-          : upgrade.id === 'iceShardUnlock'
-            ? '路线预告：火 + 冰 → 霜爆'
-            : '即时强化 · 不锁定反应路线'
-        : '';
-      button.innerHTML = `<span class="upgrade-card__rarity">${isReaction ? 'ELEMENT REACTION' : 'BUILD UPGRADE'}</span><strong>${upgrade.name}</strong><span class="upgrade-card__description">${upgrade.description}</span>${routePreview ? `<span class="upgrade-card__route">${routePreview}</span>` : ''}`;
+      const category = isReaction
+        ? 'ELEMENT FUSION'
+        : isMutation ? 'WEAPON MUTATION' : isMastery ? 'ENDLESS MASTERY' : 'BUILD UPGRADE';
+      button.innerHTML = `<span class="upgrade-card__rarity">${category}</span><strong>${upgrade.name}</strong><span class="upgrade-card__description">${upgrade.description}</span>`;
       button.addEventListener('click', () => this.chooseUpgrade(upgrade.id));
       return button;
     }));
-    this.elements.reactionRouteRule.hidden = !isFirstUpgrade;
+    this.elements.reactionRouteRule.hidden = false;
     this.syncUi();
     this.elements.upgradeChoices.firstElementChild?.focus();
     this.announce(`升级。请选择 ${choices.length} 项元素能力中的一项。`);
@@ -155,6 +173,17 @@ export class GameApp {
   togglePause() {
     if (this.run.state === 'running') this.pause();
     else if (this.run.state === 'paused') this.resume();
+  }
+
+  triggerBurst() {
+    this.audio.unlock();
+    if (!activateBurst(this.run, CONFIG)) return false;
+    this.renderer.react(this.run.events);
+    this.audio.handle(this.run.events);
+    this.showBattleEvents(this.run.events);
+    this.announce(`元素爆发已启动，持续 ${CONFIG.burst.duration} 秒。`);
+    this.syncHud();
+    return true;
   }
 
   pause() {
@@ -180,11 +209,30 @@ export class GameApp {
     this.input.clear();
     const damageSource = this.run.stats.lastDamageSource?.label ?? '未知威胁';
     const damageKind = this.run.stats.lastDamageSource?.kind === 'contact' ? '接触' : '未知方式';
-    const reactionId = this.run.reactionSlot;
-    const routeName = reactionId ? CONFIG.reactions[reactionId].name : '未形成';
-    const reactionActivations = reactionId ? (this.run.stats.reactionActivations[reactionId] ?? 0) : 0;
-    const reactionHits = reactionId ? (this.run.stats.reactionHits[reactionId] ?? 0) : 0;
+    const reactionIds = this.run.fusionSlots;
+    const routeName = reactionIds.length > 0
+      ? reactionIds.map((id) => CONFIG.reactions[id].name).join(' · ')
+      : '未形成';
+    const reactionActivations = reactionIds.reduce(
+      (total, id) => total + (this.run.stats.reactionActivations[id] ?? 0),
+      0,
+    );
+    const reactionHits = reactionIds.reduce(
+      (total, id) => total + (this.run.stats.reactionHits[id] ?? 0),
+      0,
+    );
     this.elements.summary.innerHTML = `<span>坚持 <strong>${formatTime(this.run.time)}</strong></span><span>击杀 <strong>${this.run.stats.kills}</strong></span><span>等级 <strong>${this.run.player.level}</strong></span><span>升级 <strong>${this.run.stats.upgradePicks.length}</strong></span><span>本局路线 <strong>${routeName}</strong></span><span>反应数据 <strong>${reactionActivations} 次 · ${reactionHits} 命中</strong></span><span>最后伤害 <strong>${damageSource} · ${damageKind}</strong></span>`;
+    let leaderboard = loadLeaderboard();
+    if (this.lastRecordedRunId !== this.run.id) {
+      leaderboard = recordLeaderboardEntry(globalThis.localStorage, {
+        time: this.run.time,
+        kills: this.run.stats.kills,
+        level: this.run.player.level,
+      });
+      this.lastRecordedRunId = this.run.id;
+    }
+    this.renderLeaderboard(this.elements.gameOverLeaderboard, leaderboard);
+    this.renderLeaderboard(this.elements.titleLeaderboard, leaderboard);
     this.syncUi();
     this.announce(`本局结束，坚持 ${formatTime(this.run.time)}，击杀 ${this.run.stats.kills}。`);
   }
@@ -219,15 +267,31 @@ export class GameApp {
       return pip;
     }));
 
-    const reactionIds = Object.keys(this.run.unlockedReactions);
+    const burstActive = this.run.time < this.run.burst.activeUntil;
+    const burstRatio = Math.min(1, this.run.burst.charge / this.run.burst.maxCharge);
+    const burstReady = burstRatio >= 1 && !burstActive && this.run.state === 'running';
+    this.elements.burstFill.style.transform = `scaleY(${burstRatio})`;
+    this.elements.burstValue.textContent = burstActive
+      ? `${Math.max(0, this.run.burst.activeUntil - this.run.time).toFixed(1)}s`
+      : `${Math.round(burstRatio * 100)}%`;
+    this.elements.burstButton.disabled = !burstReady;
+    this.elements.burstButton.classList.toggle('burst-button--ready', burstReady);
+    this.elements.burstButton.classList.toggle('burst-button--active', burstActive);
+    if (!this.elements.eventBanner.hidden && this.run.time >= this.bannerUntil) {
+      this.elements.eventBanner.hidden = true;
+    }
+
+    const reactionIds = this.run.fusionSlots;
     const reactionHints = [];
-    if (!this.run.reactionSlot && this.run.weapons.fireball && this.run.weapons.windBlade) {
+    if (this.run.fusionSlots.length < 2 && !this.run.unlockedReactions.fireTornado && this.run.weapons.fireball && this.run.weapons.windBlade) {
       reactionHints.push('火 + 风 → 火焰龙卷｜持续环绕');
     }
-    if (!this.run.reactionSlot && this.run.weapons.fireball && this.run.weapons.iceShard) {
+    if (this.run.fusionSlots.length < 2 && !this.run.unlockedReactions.thermalShock && this.run.weapons.fireball && this.run.weapons.iceShard) {
       reactionHints.push('火 + 冰 → 霜爆｜减速后引爆');
     }
-    const signature = `${Object.keys(this.run.weapons).join(',')}|${reactionIds.join(',')}|${reactionHints.join('|')}`;
+    const mutationSignature = Object.entries(this.run.weaponMutations).map(([weapon, behavior]) => `${weapon}:${behavior}`).join(',');
+    const masterySignature = Object.entries(this.run.masteries).map(([id, rank]) => `${id}:${rank}`).join(',');
+    const signature = `${Object.keys(this.run.weapons).join(',')}|${reactionIds.join(',')}|${mutationSignature}|${masterySignature}|${reactionHints.join('|')}`;
     if (signature !== this.lastWeaponSignature) {
       const chips = Object.values(this.run.weapons).map((weapon) => {
         const chip = this.document.createElement('span');
@@ -239,6 +303,24 @@ export class GameApp {
         const chip = this.document.createElement('span');
         chip.className = 'weapon-chip weapon-chip--reaction';
         chip.textContent = CONFIG.reactions[id].name;
+        chips.push(chip);
+      }
+      for (const [weaponId, behavior] of Object.entries(this.run.weaponMutations)) {
+        const mutation = CONFIG.upgrades.find((upgrade) => (
+          upgrade.kind === 'mutation' && upgrade.weapon === weaponId && upgrade.behavior === behavior
+        ));
+        if (!mutation) continue;
+        const chip = this.document.createElement('span');
+        chip.className = 'weapon-chip weapon-chip--mutation';
+        chip.textContent = mutation.name;
+        chips.push(chip);
+      }
+      for (const [id, rank] of Object.entries(this.run.masteries)) {
+        const mastery = CONFIG.upgrades.find((upgrade) => upgrade.id === id);
+        if (!mastery) continue;
+        const chip = this.document.createElement('span');
+        chip.className = 'weapon-chip weapon-chip--mastery';
+        chip.textContent = `${mastery.name} ×${rank}`;
         chips.push(chip);
       }
       for (const hint of reactionHints) {
@@ -254,6 +336,38 @@ export class GameApp {
 
   announce(message) {
     this.elements.status.textContent = message;
+  }
+
+  showBattleEvents(events) {
+    const event = [...events].reverse().find(({ type }) => (
+      type === 'worldRule' || type === 'eliteSpawn' || type === 'burstActivate'
+    ));
+    if (!event) return;
+    const ruleLabels = {
+      surgingHorde: '汹涌怪潮：敌群密度提升',
+      hardenedShell: '硬化外壳：敌人生命强化',
+      volatilePursuit: '狂暴追猎：敌人速度强化',
+    };
+    this.elements.eventBanner.textContent = event.type === 'worldRule'
+      ? `世界法则 ${event.level} · ${ruleLabels[event.rule] ?? event.rule}`
+      : event.type === 'eliteSpawn' ? '精英入侵 · 击破可获得高阶核心' : '元素爆发 · 全能力超载';
+    this.elements.eventBanner.hidden = false;
+    this.bannerUntil = this.run.time + (event.type === 'worldRule' ? 4 : 2.4);
+  }
+
+  renderLeaderboard(container, entries) {
+    if (!container) return;
+    if (entries.length === 0) {
+      const empty = this.document.createElement('li');
+      empty.textContent = '尚无记录，第一局由你定义。';
+      container.replaceChildren(empty);
+      return;
+    }
+    container.replaceChildren(...entries.map((entry, index) => {
+      const item = this.document.createElement('li');
+      item.textContent = `#${index + 1}  ${formatTime(entry.time)} · ${entry.kills} 击杀 · Lv.${entry.level}`;
+      return item;
+    }));
   }
 
   installTestSnapshot() {
@@ -279,13 +393,19 @@ export class GameApp {
           player: { ...this.run.player },
           world: { ...CONFIG.world },
           enemyCount: this.run.enemies.length,
-          enemies: this.run.enemies.map(({ id, type, x, y, radius }) => ({ id, type, x, y, radius })),
+          enemies: this.run.enemies.map(({ id, type, x, y, radius, elite }) => ({ id, type, x, y, radius, elite })),
           projectileCount: this.run.projectiles.length,
           xpOrbCount: this.run.xpOrbs.length,
-          xpOrbs: this.run.xpOrbs.map(({ id, x, y, value }) => ({ id, x, y, value })),
+          xpOrbs: this.run.xpOrbs.map(({ id, x, y, value, tier }) => ({ id, x, y, value, tier })),
           particleCount: this.run.particles.length,
           weapons: Object.keys(this.run.weapons),
           reactions: Object.keys(this.run.unlockedReactions),
+          fusionSlots: [...this.run.fusionSlots],
+          mutations: { ...this.run.weaponMutations },
+          masteries: { ...this.run.masteries },
+          burst: { ...this.run.burst },
+          worldRules: [...this.run.worldRules],
+          leaderboard: loadLeaderboard(),
           upgrades: [...this.run.stats.upgradePicks],
           stats: JSON.parse(JSON.stringify(this.run.stats)),
           loop: { running: this.loop.running, paused: this.loop.paused },

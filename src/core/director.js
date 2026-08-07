@@ -16,6 +16,11 @@ export function getEncounterPlan(run, config = CONFIG) {
   const targetEnemyCount = Math.min(config.limits.enemies, Math.floor(30 + time * 0.2));
   const remaining = Math.max(0, targetEnemyCount - run.enemies.length);
   const batchSize = Math.min(2, 1 + Math.floor(time / 180));
+  const endlessMinutes = Math.max(0, time - 180) / 60;
+  const healthScale = 1 + endlessMinutes * 0.14;
+  const damageScale = 1 + endlessMinutes * 0.08;
+  const speedScale = 1 + Math.min(0.35, endlessMinutes * 0.025);
+  const nextEliteAt = run.nextEliteAt ?? 240;
 
   return {
     phase,
@@ -25,6 +30,9 @@ export function getEncounterPlan(run, config = CONFIG) {
     targetEnemyCount,
     spawnCount: Math.min(batchSize, remaining),
     canSpawn: remaining > 0,
-    elite: false,
+    elite: time >= nextEliteAt && remaining > 0,
+    healthScale,
+    damageScale,
+    speedScale,
   };
 }

@@ -3,8 +3,8 @@ import { nextRandom } from './random.js';
 
 const VALID_STATES = new Set(['title', 'running', 'levelUp', 'paused', 'gameOver']);
 
-function createWeapon(id, config) {
-  return { ...config.weapons[id], cooldownRemaining: 0, level: 1 };
+function createWeapon(id, config, cooldownMultiplier = 1) {
+  return { ...config.weapons[id], cooldown: config.weapons[id].cooldown * cooldownMultiplier, cooldownRemaining: 0, level: 1 };
 }
 
 export function createRun({ seed = Date.now(), runId = 1, state = 'title', config = CONFIG } = {}) {
@@ -18,6 +18,10 @@ export function createRun({ seed = Date.now(), runId = 1, state = 'title', confi
     rngState: seed >>> 0,
     nextEntityId: 1,
     spawnTimer: 0,
+    nextEliteAt: 240,
+    nextWorldRuleAt: 480,
+    worldRuleLevel: 0,
+    worldRules: [],
     player: {
       x: config.world.width / 2,
       y: config.world.height / 2,
@@ -30,11 +34,21 @@ export function createRun({ seed = Date.now(), runId = 1, state = 'title', confi
       xp: 0,
       xpToNext: config.player.xpCurve[1],
       pickupRadius: config.player.pickupRadius,
+      damageMultiplier: 1,
+      weaponCooldownMultiplier: 1,
     },
     weapons: { fireball: createWeapon('fireball', config) },
     upgrades: { fireballUnlock: 1 },
+    masteries: {},
+    weaponMutations: {},
     unlockedReactions: {},
-    reactionSlot: null,
+    fusionSlots: [],
+    burst: {
+      charge: 0,
+      maxCharge: config.burst.maxCharge,
+      activeUntil: 0,
+      activations: 0,
+    },
     pendingLevelUps: 0,
     currentUpgradeChoices: [],
     enemies: [],
@@ -49,6 +63,7 @@ export function createRun({ seed = Date.now(), runId = 1, state = 'title', confi
       attacks: 0,
       kills: 0,
       killsByType: {},
+      eliteKills: 0,
       xpProduced: 0,
       xpCollected: 0,
       slowEnemySeconds: 0,
@@ -65,6 +80,23 @@ export function createRun({ seed = Date.now(), runId = 1, state = 'title', confi
       fps: { average: 0, minimum: 0, samples: 0, hitches: 0, maximumInterval: 0 },
     },
   };
+}
+
+export function gainBurstCharge(run, amount, config = CONFIG) {
+  if (amount <= 0) return run.burst.charge;
+  run.burst.charge = Math.min(config.burst.maxCharge, run.burst.charge + amount);
+  return run.burst.charge;
+}
+
+export function activateBurst(run, config = CONFIG) {
+  if (run.state !== 'running'
+    || run.time < run.burst.activeUntil
+    || run.burst.charge < config.burst.maxCharge) return false;
+  run.burst.charge = 0;
+  run.burst.activeUntil = run.time + config.burst.duration;
+  run.burst.activations += 1;
+  run.events.push({ type: 'burstActivate', x: run.player.x, y: run.player.y });
+  return true;
 }
 
 export function restartRun(run, { seed = Date.now(), config = CONFIG } = {}) {
@@ -102,8 +134,10 @@ export function gainXp(run, amount, config = CONFIG) {
 
 export function eligibleUpgrades(run, config = CONFIG) {
   return config.upgrades.filter((upgrade) => {
-    if (run.upgrades[upgrade.id]) return false;
-    if (upgrade.kind === 'reaction' && run.reactionSlot) return false;
+    if (!upgrade.repeatable && run.upgrades[upgrade.id]) return false;
+    if (upgrade.minimumLevel && run.player.level < upgrade.minimumLevel) return false;
+    if (upgrade.kind === 'reaction' && run.fusionSlots.length >= 2) return false;
+    if (upgrade.kind === 'mutation' && run.weaponMutations[upgrade.weapon]) return false;
     return (upgrade.requires ?? []).every((requirement) => run.upgrades[requirement]);
   });
 }
@@ -123,11 +157,16 @@ export function createUpgradeChoices(run, config = CONFIG, count = 3) {
       .filter(Boolean);
     const remaining = candidates.filter(({ id }) => !routeIds.has(id));
     choices = [...routeChoices, ...remaining].slice(0, count);
-  } else if (!run.reactionSlot && count > 0) {
+  } else if (run.fusionSlots.length < 2 && count > 0) {
     const reactionChoice = candidates.find(({ kind }) => kind === 'reaction');
     if (reactionChoice && !choices.some(({ kind }) => kind === 'reaction')) {
       choices = [reactionChoice, ...choices.slice(0, count - 1)];
     }
+  }
+  if (choices.length < count) {
+    const chosenIds = new Set(choices.map(({ id }) => id));
+    const fallbackMasteries = config.upgrades.filter(({ repeatable, id }) => repeatable && !chosenIds.has(id));
+    choices = [...choices, ...fallbackMasteries].slice(0, count);
   }
   run.currentUpgradeChoices = choices.map(({ id }) => id);
   return choices;
@@ -136,12 +175,13 @@ export function createUpgradeChoices(run, config = CONFIG, count = 3) {
 export function applyUpgrade(run, upgradeId, config = CONFIG) {
   if (run.state !== 'levelUp' || !run.currentUpgradeChoices.includes(upgradeId)) return false;
   const upgrade = config.upgrades.find(({ id }) => id === upgradeId);
-  if (!upgrade || run.upgrades[upgradeId]) return false;
-  if (upgrade.kind === 'reaction' && run.reactionSlot) return false;
+  if (!upgrade || (!upgrade.repeatable && run.upgrades[upgradeId])) return false;
+  if (upgrade.kind === 'reaction' && run.fusionSlots.length >= 2) return false;
+  if (upgrade.kind === 'mutation' && run.weaponMutations[upgrade.weapon]) return false;
 
   switch (upgrade.kind) {
     case 'unlock':
-      run.weapons[upgrade.weapon] = createWeapon(upgrade.weapon, config);
+      run.weapons[upgrade.weapon] = createWeapon(upgrade.weapon, config, run.player.weaponCooldownMultiplier);
       break;
     case 'projectiles':
     case 'radius':
@@ -157,14 +197,29 @@ export function applyUpgrade(run, upgradeId, config = CONFIG) {
     case 'moveSpeedMultiplier':
       run.player.speed *= upgrade.amount;
       break;
+    case 'mutation':
+      run.weaponMutations[upgrade.weapon] = upgrade.behavior;
+      break;
     case 'reaction':
-      run.reactionSlot = upgrade.reaction;
+      run.fusionSlots.push(upgrade.reaction);
       run.unlockedReactions[upgrade.reaction] = true;
+      break;
+    case 'damageMultiplier':
+      run.player.damageMultiplier *= upgrade.amount;
+      break;
+    case 'globalCooldownMultiplier':
+      run.player.weaponCooldownMultiplier *= upgrade.amount;
+      for (const weapon of Object.values(run.weapons)) weapon.cooldown *= upgrade.amount;
+      break;
+    case 'maxHealth':
+      run.player.maxHealth += upgrade.amount;
+      run.player.health = Math.min(run.player.maxHealth, run.player.health + upgrade.amount);
       break;
     default:
       return false;
   }
-  run.upgrades[upgradeId] = 1;
+  run.upgrades[upgradeId] = (run.upgrades[upgradeId] ?? 0) + 1;
+  if (upgrade.repeatable) run.masteries[upgradeId] = (run.masteries[upgradeId] ?? 0) + 1;
   run.stats.upgradePicks.push(upgradeId);
   run.pendingLevelUps = Math.max(0, run.pendingLevelUps - 1);
   run.currentUpgradeChoices = [];

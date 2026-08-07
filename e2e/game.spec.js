@@ -64,7 +64,7 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
   await page.goto('/?test=1');
   await expect(page.locator('html')).toHaveAttribute('data-game-ready', 'ready');
   await expect(page.getByRole('button', { name: '开始觉醒' })).toBeVisible();
-  await page.screenshot({ path: screenshotPath('v0.5-title') });
+  await page.screenshot({ path: screenshotPath('v0.7-title') });
 
   await page.getByRole('button', { name: '开始觉醒' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-game-state', 'running');
@@ -76,14 +76,14 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
 
   await expect.poll(async () => (await snapshot(page)).stats.attacks, { timeout: 8_000 }).toBeGreaterThan(0);
   await expect.poll(async () => (await snapshot(page)).enemyCount, { timeout: 8_000 }).toBeGreaterThan(0);
-  await page.screenshot({ path: screenshotPath('v0.5-gameplay') });
+  await page.screenshot({ path: screenshotPath('v0.7-gameplay') });
 
   await page.getByRole('button', { name: '暂停游戏' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-game-state', 'paused');
   const pausedAt = (await snapshot(page)).time;
   await page.waitForTimeout(350);
   expect((await snapshot(page)).time).toBe(pausedAt);
-  await page.screenshot({ path: screenshotPath('v0.5-paused') });
+  await page.screenshot({ path: screenshotPath('v0.7-paused') });
   await page.getByRole('button', { name: '继续战斗' }).click();
 
   const upgradeDeadline = Date.now() + 70_000;
@@ -95,17 +95,22 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
   }
 
   await expect(page.locator('html')).toHaveAttribute('data-game-state', 'levelUp');
-  await expect(page.locator('#reaction-route-rule')).toContainText('本局只能激活一种');
-  await expect(page.locator('#reaction-route-rule')).toContainText('首个完成的元素反应将锁定本局路线');
-  await expect(page.locator('[data-upgrade-id="windBladeUnlock"]')).toContainText('路线预告：火 + 风 → 火焰龙卷');
-  await expect(page.locator('[data-upgrade-id="iceShardUnlock"]')).toContainText('路线预告：火 + 冰 → 霜爆');
+  await expect(page.locator('#reaction-route-rule')).toContainText('融合槽最多 2 个');
+  await expect(page.locator('#reaction-route-rule')).toContainText('武器蜕变彼此独立');
+  await expect(page.locator('[data-upgrade-id="windBladeUnlock"]')).toContainText('火焰龙卷');
+  await expect(page.locator('[data-upgrade-id="iceShardUnlock"]')).toContainText('霜爆');
   const neutralChoice = page.locator('[data-upgrade-id]:not([data-upgrade-id="windBladeUnlock"]):not([data-upgrade-id="iceShardUnlock"])');
-  await expect(neutralChoice).toContainText('即时强化 · 不锁定反应路线');
-  await page.screenshot({ path: screenshotPath('v0.5-upgrade') });
+  await expect(neutralChoice).toHaveCount(1);
+  await page.screenshot({ path: screenshotPath('v0.7-upgrade') });
   const firstUpgrade = page.locator('[data-upgrade-id]').first();
   const upgradeLabels = await page.locator('.upgrade-card__rarity').allTextContents();
   expect(upgradeLabels.length).toBeGreaterThan(0);
-  expect(upgradeLabels.every((label) => ['BUILD UPGRADE', 'ELEMENT REACTION'].includes(label))).toBe(true);
+  expect(upgradeLabels.every((label) => [
+    'BUILD UPGRADE',
+    'ELEMENT FUSION',
+    'WEAPON MUTATION',
+    'ENDLESS MASTERY',
+  ].includes(label))).toBe(true);
   const pickedId = await firstUpgrade.getAttribute('data-upgrade-id');
   const positionBeforePick = (await snapshot(page)).player;
   await page.keyboard.down('KeyD');
@@ -127,7 +132,10 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
   await expect(page.locator('#run-summary')).toContainText('0 次 · 0 命中');
   await expect(page.locator('#run-summary')).not.toContainText('下局目标');
   await expect(page.getByRole('button', { name: '再来一局' })).toBeVisible();
-  await page.screenshot({ path: screenshotPath('v0.5-game-over') });
+  await expect(page.locator('#game-over-leaderboard li')).toHaveCount(1);
+  await expect(page.locator('#game-over-leaderboard')).toContainText('#1');
+  expect(ended.leaderboard).toHaveLength(1);
+  await page.screenshot({ path: screenshotPath('v0.7-game-over') });
 
   const restarted = await page.evaluate(() => {
     document.querySelector('#restart-button').click();
@@ -139,6 +147,10 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
   expect(restarted.projectileCount).toBe(0);
   expect(restarted.particleCount).toBe(0);
   expect(restarted.upgrades).toEqual([]);
+  expect(restarted.fusionSlots).toEqual([]);
+  expect(restarted.mutations).toEqual({});
+  expect(restarted.burst).toMatchObject({ charge: 0, activeUntil: 0, activations: 0 });
+  expect(restarted.leaderboard).toHaveLength(1);
   expect(restarted.stats.lastDamageSource).toBeNull();
   expect(restarted.stats.milestones).toEqual({ firstKillAt: null, firstXpAt: null, firstLevelUpAt: null });
   expect(restarted.loop).toEqual({ running: true, paused: false });
@@ -160,11 +172,13 @@ test.describe('手机触控', () => {
   test('手机布局显示摇杆并能控制角色移动', async ({ page }) => {
     await page.goto('/?test=1');
     await expect(page.locator('html')).toHaveAttribute('data-game-ready', 'ready');
-    await expect(page.getByText('左下角摇杆')).toBeVisible();
+    await expect(page.getByText('自动攻击 · 无尽生存')).toBeVisible();
     await page.getByRole('button', { name: '开始觉醒' }).tap();
 
     const stick = page.getByRole('button', { name: '移动摇杆' });
     await expect(stick).toBeVisible();
+    await expect(page.getByRole('button', { name: '释放元素爆发' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '释放元素爆发' })).toBeDisabled();
     const bounds = await stick.boundingBox();
     const started = await snapshot(page);
     const centerX = bounds.x + bounds.width / 2;

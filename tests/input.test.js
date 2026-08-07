@@ -21,6 +21,30 @@ test('a repeated OS keydown cannot restore movement after input is cleared', () 
   assert.deepEqual(input.direction, { x: 0, y: 0 });
 });
 
+test('elemental burst responds once to keyboard and the mobile action button', () => {
+  let activations = 0;
+  const button = {
+    addEventListener(type, handler) { this[type] = handler; },
+    removeEventListener(type) { delete this[type]; },
+  };
+  const target = {
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const input = new InputSystem(target, () => {}, null, () => { activations += 1; }, button);
+  const event = (code, repeat = false) => ({ code, repeat, preventDefault() {} });
+
+  input.attach();
+  input.handleKeyDown(event('Space'));
+  input.handleKeyDown(event('KeyE'));
+  input.handleKeyDown(event('Space', true));
+  button.pointerdown({ preventDefault() {} });
+
+  assert.equal(activations, 3);
+  input.detach();
+  assert.equal(button.pointerdown, undefined);
+});
+
 test('directionForPointer scales short drags and clamps long drags', () => {
   assert.deepEqual(directionForPointer({ x: 10, y: 10 }, { x: 10, y: 10 }), { x: 0, y: 0 });
   assert.deepEqual(directionForPointer({ x: 0, y: 0 }, { x: 28, y: 0 }, 56), { x: 0.5, y: 0 });

@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 
 import { CONFIG, validateConfig } from '../src/data/config.js';
 
-test('V0.3 config has unique, referentially valid content', () => {
+test('V0.7 config has unique, referentially valid content', () => {
   assert.deepEqual(validateConfig(CONFIG), []);
   assert.deepEqual(Object.keys(CONFIG.weapons).sort(), ['fireball', 'iceShard', 'windBlade']);
   assert.deepEqual(Object.keys(CONFIG.enemies).sort(), ['brute', 'chaser', 'swift']);
-  assert.equal(CONFIG.upgrades.length, 11);
+  assert.equal(CONFIG.upgrades.length, 23);
   assert.deepEqual(Object.keys(CONFIG.reactions), ['fireTornado', 'thermalShock']);
   assert.ok(CONFIG.world.width > 0);
   assert.ok(CONFIG.world.height > 0);

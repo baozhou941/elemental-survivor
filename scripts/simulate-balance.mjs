@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 
 import { CONFIG } from '../src/data/config.js';
 import {
+  activateBurst,
   applyUpgrade,
   createRun,
   createUpgradeChoices,
@@ -93,7 +94,11 @@ function serialiseRun(run, seed, duration, route) {
   return {
     seed,
     route,
-    reactionSlot: run.reactionSlot,
+    fusionSlots: [...run.fusionSlots],
+    mutations: { ...run.weaponMutations },
+    masteries: { ...run.masteries },
+    worldRules: [...run.worldRules],
+    burstActivations: run.burst.activations,
     targetDuration: duration,
     survived: run.time >= duration && run.state !== 'gameOver',
     state: run.state,
@@ -129,6 +134,9 @@ export function simulateBalanceRun({ seed, duration = 180, route = 'auto', confi
     if (run.state === 'levelUp') {
       chooseUpgrade(run, config, route);
       continue;
+    }
+    if (run.burst.charge >= run.burst.maxCharge && run.time >= run.burst.activeUntil) {
+      activateBurst(run, config);
     }
     const dt = Math.min(config.fixedStep, duration - run.time);
     stepSimulation(run, { dt, input: steeringInput(run, config), config });
@@ -183,6 +191,7 @@ export function aggregateBalanceRuns(runs, targetDuration) {
       xpCollected: metric((run) => run.xpCollected),
       reactionHits: metric((run) => run.reactionHits),
       reactionZeroHitActivations: metric((run) => run.reactionZeroHitActivations),
+      burstActivations: metric((run) => run.burstActivations),
       peakEnemies: metric((run) => run.peaks.enemies),
       peakProjectiles: metric((run) => run.peaks.projectiles),
       peakParticles: metric((run) => run.peaks.particles),

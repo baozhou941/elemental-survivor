@@ -31,7 +31,7 @@ test('wind and ice simulation routes independently establish their intended reac
     for (const seed of [1, 2, 3]) {
       const run = simulateBalanceRun({ seed, duration: 90, route });
       assert.equal(run.route, route);
-      assert.equal(run.reactionSlot, expectedReaction);
+      assert.deepEqual(run.fusionSlots, [expectedReaction]);
       assert.ok(run.reactions.includes(expectedReaction));
       assert.ok(!run.reactions.includes(rejectedReaction));
     }
@@ -46,4 +46,5 @@ test('ice route survives at least nine of ten fixed three-minute runs', () => {
   }));
 
   assert.ok(runs.filter(({ survived }) => survived).length >= 9);
+  assert.ok(runs.every(({ burstActivations }) => burstActivations > 0));
 });

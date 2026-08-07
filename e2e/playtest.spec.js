@@ -7,7 +7,7 @@ const OUTPUT_DIR = 'artifacts/playtest';
 const PLAYTEST_ROUTE = process.env.PLAYTEST_ROUTE === 'ice' ? 'ice' : 'wind';
 const PLAYTEST_DURATION = Number(process.env.PLAYTEST_DURATION ?? 180);
 const PLAYTEST_URL = process.env.PLAYTEST_URL ?? '/?test=1';
-const PLAYTEST_LABEL = process.env.PLAYTEST_LABEL ?? `v0.5-${PLAYTEST_ROUTE}-three-minute`;
+const PLAYTEST_LABEL = process.env.PLAYTEST_LABEL ?? `v0.7-${PLAYTEST_ROUTE}-three-minute`;
 const ROUTES = {
   wind: { unlock: 'windBladeUnlock', reaction: 'fireTornado' },
   ice: { unlock: 'iceShardUnlock', reaction: 'thermalShock' },
@@ -38,6 +38,14 @@ async function chooseUpgrade(page) {
   await page.locator(`[data-upgrade-id="${preferred}"]`).click();
 }
 
+async function activateBurstWhenReady(page, run) {
+  const burstReady = run.burst.charge >= run.burst.maxCharge
+    && run.time >= run.burst.activeUntil;
+  if (!burstReady) return false;
+  await page.keyboard.press('Space');
+  return true;
+}
+
 test('自动避敌试玩可以持续三分钟并记录本地战斗遥测', async ({ page }) => {
   test.setTimeout(240_000);
   await mkdir(OUTPUT_DIR, { recursive: true });
@@ -47,7 +55,10 @@ test('自动避敌试玩可以持续三分钟并记录本地战斗遥测', async
   let run = await snapshot(page);
   while (run.time < PLAYTEST_DURATION && run.state !== 'gameOver') {
     if (run.state === 'levelUp') await chooseUpgrade(page);
-    else await move(page, steeringKeys(run));
+    else {
+      await activateBurstWhenReady(page, run);
+      await move(page, steeringKeys(run));
+    }
     run = await snapshot(page);
   }
 
@@ -58,7 +69,9 @@ test('自动避敌试玩可以持续三分钟并记录本地战斗遥测', async
   expect(run.stats.kills).toBeGreaterThan(0);
   expect(run.player.level).toBeGreaterThan(1);
   if (PLAYTEST_DURATION >= 180) {
-    expect(run.reactions).toEqual([ROUTE.reaction]);
+    expect(run.reactions).toContain(ROUTE.reaction);
+    expect(run.reactions.length).toBeLessThanOrEqual(2);
+    expect(run.burst.activations).toBeGreaterThan(0);
   }
   expect(run.stats.fps.average).toBeGreaterThan(45);
 });
