@@ -2,6 +2,71 @@ import { CONFIG } from '../data/config.js';
 import { getEncounterPlan } from './director.js';
 import { damagePlayer, gainBurstCharge, gainXp } from './model.js';
 import { nextRandom } from './random.js';
+import { SpatialGrid } from './spatial-grid.js';
+
+const ENEMY_GRID_CELL_SIZE = 96;
+const enemySpatialCaches = new WeakMap();
+
+function getEnemySpatialCache(run) {
+  let cache = enemySpatialCaches.get(run);
+  if (!cache) {
+    cache = {
+      grid: new SpatialGrid(ENEMY_GRID_CELL_SIZE),
+      source: null,
+      length: -1,
+      dirty: true,
+      buffers: {
+        nearest: [],
+        projectile: [],
+        effect: [],
+        reaction: [],
+      },
+    };
+    enemySpatialCaches.set(run, cache);
+  }
+  return cache;
+}
+
+function markEnemyGridDirty(run) {
+  const cache = enemySpatialCaches.get(run);
+  if (cache) cache.dirty = true;
+}
+
+function updateEnemyGridPosition(run, enemy, previousX, previousY) {
+  const cache = enemySpatialCaches.get(run);
+  if (!cache || cache.dirty || cache.source !== run.enemies || cache.length !== run.enemies.length) {
+    markEnemyGridDirty(run);
+    return;
+  }
+  cache.grid.update(enemy, previousX, previousY);
+}
+
+function ensureEnemyGrid(run) {
+  const cache = getEnemySpatialCache(run);
+  if (cache.dirty || cache.source !== run.enemies || cache.length !== run.enemies.length) {
+    cache.grid.rebuild(run.enemies);
+    cache.source = run.enemies;
+    cache.length = run.enemies.length;
+    cache.dirty = false;
+  }
+  return cache;
+}
+
+function collisionStats(run) {
+  if (!run.stats.collision) run.stats.collision = { candidates: 0, exactChecks: 0 };
+  return run.stats.collision;
+}
+
+function queryEnemyCandidates(run, x, y, radius, bufferName) {
+  const cache = ensureEnemyGrid(run);
+  const candidates = cache.grid.queryCircleCandidates(x, y, radius, cache.buffers[bufferName]);
+  collisionStats(run).candidates += candidates.length;
+  return candidates;
+}
+
+function recordExactCheck(run) {
+  collisionStats(run).exactChecks += 1;
+}
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -80,6 +145,7 @@ export function spawnEnemy(run, type, x, y, config = CONFIG, modifiers = {}) {
     phase: (run.nextEntityId * 1.618) % (Math.PI * 2),
   };
   run.enemies.push(enemy);
+  markEnemyGridDirty(run);
   return enemy;
 }
 
@@ -128,38 +194,40 @@ export function stepEnemies(run, dt, config = CONFIG) {
       }
     }
   }
+  markEnemyGridDirty(run);
 }
 
 function nearestEnemy(run) {
-  let nearest = null;
-  let nearestDistanceSquared = Infinity;
-  for (const enemy of run.enemies) {
-    if (enemy.dead) continue;
-    const dx = enemy.x - run.player.x;
-    const dy = enemy.y - run.player.y;
-    const distanceSquared = dx * dx + dy * dy;
-    if (distanceSquared < nearestDistanceSquared) {
-      nearest = enemy;
-      nearestDistanceSquared = distanceSquared;
-    }
-  }
-  return nearest;
+  return nearestEnemyFrom(run, run.player.x, run.player.y);
 }
 
 function nearestEnemyFrom(run, x, y, excludedId = null) {
-  let nearest = null;
-  let nearestDistanceSquared = Infinity;
-  for (const enemy of run.enemies) {
-    if (enemy.dead || enemy.id === excludedId) continue;
-    const dx = enemy.x - x;
-    const dy = enemy.y - y;
-    const distanceSquared = dx * dx + dy * dy;
-    if (distanceSquared < nearestDistanceSquared) {
-      nearest = enemy;
-      nearestDistanceSquared = distanceSquared;
+  const cache = ensureEnemyGrid(run);
+  if (cache.grid.size === 0) return null;
+
+  let searchRadius = cache.grid.cellSize;
+  while (true) {
+    const candidates = queryEnemyCandidates(run, x, y, searchRadius, 'nearest');
+    let nearest = null;
+    let nearestDistanceSquared = Infinity;
+    for (const enemy of candidates) {
+      if (enemy.dead || enemy.id === excludedId) continue;
+      recordExactCheck(run);
+      const dx = enemy.x - x;
+      const dy = enemy.y - y;
+      const distanceSquared = dx * dx + dy * dy;
+      if (distanceSquared < nearestDistanceSquared) {
+        nearest = enemy;
+        nearestDistanceSquared = distanceSquared;
+      }
     }
+
+    if (nearest && nearestDistanceSquared <= searchRadius * searchRadius) return nearest;
+    if (candidates.length === cache.grid.size) return nearest;
+    searchRadius = nearest
+      ? Math.max(searchRadius * 2, Math.sqrt(nearestDistanceSquared))
+      : searchRadius * 2;
   }
-  return nearest;
 }
 
 function fireWeapon(run, weapon, target, config) {
@@ -308,8 +376,16 @@ function triggerBurstReaction(run, reactionId, triggerEnemy, config) {
   });
 
   let hits = 0;
-  for (const enemy of run.enemies) {
+  const candidates = queryEnemyCandidates(
+    run,
+    triggerEnemy.x,
+    triggerEnemy.y,
+    definition.radius,
+    'effect',
+  );
+  for (const enemy of candidates) {
     if (enemy.dead || (enemy.health <= 0 && enemy !== triggerEnemy)) continue;
+    recordExactCheck(run);
     const reach = definition.radius + enemy.radius;
     const dx = enemy.x - triggerEnemy.x;
     const dy = enemy.y - triggerEnemy.y;
@@ -375,8 +451,11 @@ export function stepProjectiles(run, dt, config = CONFIG) {
       if (projectile.trailTimer <= 0) {
         projectile.trailTimer = 0.14;
         emitParticles(run, projectile.x, projectile.y, '#a9efff', 2, config);
-        for (const enemy of run.enemies) {
-          if (enemy.dead || Math.hypot(enemy.x - projectile.x, enemy.y - projectile.y) > 42 + enemy.radius) continue;
+        const candidates = queryEnemyCandidates(run, projectile.x, projectile.y, 42, 'effect');
+        for (const enemy of candidates) {
+          if (enemy.dead) continue;
+          recordExactCheck(run);
+          if (Math.hypot(enemy.x - projectile.x, enemy.y - projectile.y) > 42 + enemy.radius) continue;
           enemy.slowMultiplier = Math.min(enemy.slowMultiplier, 0.48);
           enemy.slowedUntil = Math.max(enemy.slowedUntil, run.time + 0.65);
         }
@@ -388,8 +467,16 @@ export function stepProjectiles(run, dt, config = CONFIG) {
       continue;
     }
 
-    for (const enemy of run.enemies) {
+    const projectileCandidates = queryEnemyCandidates(
+      run,
+      projectile.x,
+      projectile.y,
+      projectile.radius,
+      'projectile',
+    );
+    for (const enemy of projectileCandidates) {
       if (enemy.dead || projectile.hitIds.has(enemy.id)) continue;
+      recordExactCheck(run);
       const reach = projectile.radius + enemy.radius;
       const dx = projectile.x - enemy.x;
       const dy = projectile.y - enemy.y;
@@ -406,16 +493,21 @@ export function stepProjectiles(run, dt, config = CONFIG) {
         enemy.slowedUntil = Math.max(enemy.slowedUntil, run.time + projectile.slowDuration);
       }
       if (projectile.behavior === 'frostPrison') {
-        for (const nearby of run.enemies) {
-          if (nearby.dead || Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y) > 72 + nearby.radius) continue;
+        const nearbyCandidates = queryEnemyCandidates(run, enemy.x, enemy.y, 72, 'effect');
+        for (const nearby of nearbyCandidates) {
+          if (nearby.dead) continue;
+          recordExactCheck(run);
+          if (Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y) > 72 + nearby.radius) continue;
           nearby.slowMultiplier = Math.min(nearby.slowMultiplier, 0.16);
           nearby.slowedUntil = Math.max(nearby.slowedUntil, run.time + 1.25);
         }
         run.events.push({ type: 'mutation', behavior: 'frostPrison', x: enemy.x, y: enemy.y });
       } else if (projectile.behavior === 'ignitionMark') {
-        for (const nearby of run.enemies) {
-          if (nearby.dead || nearby.id === enemy.id
-            || Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y) > 68 + nearby.radius) continue;
+        const nearbyCandidates = queryEnemyCandidates(run, enemy.x, enemy.y, 68, 'effect');
+        for (const nearby of nearbyCandidates) {
+          if (nearby.dead || nearby.id === enemy.id) continue;
+          recordExactCheck(run);
+          if (Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y) > 68 + nearby.radius) continue;
           const blastDamage = projectile.damage * 0.55;
           nearby.health -= blastDamage;
           run.stats.damageByWeapon[projectile.weaponId] =
@@ -427,8 +519,11 @@ export function stepProjectiles(run, dt, config = CONFIG) {
         const dx = run.player.x - enemy.x;
         const dy = run.player.y - enemy.y;
         const distance = Math.hypot(dx, dy) || 1;
+        const previousX = enemy.x;
+        const previousY = enemy.y;
         enemy.x += (dx / distance) * Math.min(34, distance);
         enemy.y += (dy / distance) * Math.min(34, distance);
+        updateEnemyGridPosition(run, enemy, previousX, previousY);
       }
       if (projectile.element === 'fire' && wasSlowed) {
         triggerBurstReaction(run, 'thermalShock', enemy, config);
@@ -566,8 +661,16 @@ export function stepReactions(run, dt, config = CONFIG) {
     reaction.x = run.player.x + Math.cos(reaction.angle) * definition.orbitRadius;
     reaction.y = run.player.y + Math.sin(reaction.angle) * definition.orbitRadius;
 
-    for (const enemy of run.enemies) {
+    const candidates = queryEnemyCandidates(
+      run,
+      reaction.x,
+      reaction.y,
+      definition.radius,
+      'reaction',
+    );
+    for (const enemy of candidates) {
       if (enemy.dead || (reaction.nextHitByEnemy.get(enemy.id) ?? 0) > run.time) continue;
+      recordExactCheck(run);
       const reach = definition.radius + enemy.radius;
       const dx = reaction.x - enemy.x;
       const dy = reaction.y - enemy.y;
@@ -693,7 +796,13 @@ export function stepSimulation(run, { dt, input = { x: 0, y: 0 }, config = CONFI
 }
 
 function recordEntityPeaks(run) {
-  run.stats.peaks.enemies = Math.max(run.stats.peaks.enemies, run.enemies.length);
-  run.stats.peaks.projectiles = Math.max(run.stats.peaks.projectiles, run.projectiles.length);
-  run.stats.peaks.particles = Math.max(run.stats.peaks.particles, run.particles.length);
+  const current = run.stats.current;
+  current.enemies = run.enemies.length;
+  current.projectiles = run.projectiles.length;
+  current.xp = run.xpOrbs.length;
+  current.particles = run.particles.length;
+  run.stats.peaks.enemies = Math.max(run.stats.peaks.enemies, current.enemies);
+  run.stats.peaks.projectiles = Math.max(run.stats.peaks.projectiles, current.projectiles);
+  run.stats.peaks.xp = Math.max(run.stats.peaks.xp, current.xp);
+  run.stats.peaks.particles = Math.max(run.stats.peaks.particles, current.particles);
 }

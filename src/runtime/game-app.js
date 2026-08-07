@@ -4,6 +4,7 @@ import { activateBurst, applyUpgrade, createRun, createUpgradeChoices, damagePla
 import { stepSimulation } from '../core/simulation.js';
 import { AudioSystem } from './audio.js';
 import { createFrameSampler, recordFrame } from './frame-telemetry.js';
+import { diffHudSnapshot } from './hud-state.js';
 import { InputSystem } from './input.js';
 import { loadLeaderboard, recordLeaderboardEntry } from './leaderboard.js';
 import { Renderer } from './renderer.js';
@@ -58,7 +59,7 @@ export class GameApp {
       step: (dt) => this.step(dt),
       render: () => this.render(),
     });
-    this.lastWeaponSignature = '';
+    this.hudSnapshot = null;
     this.bannerUntil = 0;
     this.lastRecordedRunId = null;
     this.boundVisibility = () => {
@@ -86,7 +87,7 @@ export class GameApp {
     this.audio.unlock();
     this.run = createRun({ state: 'running', seed: Date.now(), runId: this.run.id });
     this.frameSampler = createFrameSampler();
-    this.lastWeaponSignature = '';
+    this.hudSnapshot = null;
     this.bannerUntil = 0;
     this.lastRecordedRunId = null;
     this.renderer.resetTransientEffects();
@@ -100,7 +101,7 @@ export class GameApp {
     this.audio.unlock();
     this.run = restartRun(this.run);
     this.frameSampler = createFrameSampler();
-    this.lastWeaponSignature = '';
+    this.hudSnapshot = null;
     this.bannerUntil = 0;
     this.lastRecordedRunId = null;
     this.renderer.resetTransientEffects();
@@ -162,7 +163,6 @@ export class GameApp {
     const upgrade = CONFIG.upgrades.find(({ id }) => id === upgradeId);
     if (!applyUpgrade(this.run, upgradeId, CONFIG)) return;
     this.announce(`已选择：${upgrade.name}。${upgrade.description}`);
-    this.lastWeaponSignature = '';
     if (this.run.state === 'levelUp') this.openUpgradeSelection();
     else {
       this.loop.resume();
@@ -250,49 +250,65 @@ export class GameApp {
 
   syncHud() {
     const { player } = this.run;
-    this.elements.time.textContent = formatTime(this.run.time);
-    this.elements.level.textContent = `等级 ${player.level}`;
-    const xpRatio = Math.min(1, player.xp / player.xpToNext);
-    this.elements.xp.style.width = `${xpRatio * 100}%`;
-    this.elements.xpBar.setAttribute('aria-valuenow', Math.round(xpRatio * 100));
-    this.elements.xpBar.classList.toggle('xp-bar--near', xpRatio >= 0.7);
-    this.elements.xpBar.classList.toggle('xp-bar--imminent', xpRatio >= 0.9);
-    const showXpTutorial = this.run.stats.xpCollected === 0 && this.run.xpOrbs.length > 0;
-    this.elements.xpHint.textContent = showXpTutorial
-      ? '靠近 ◇ 收集元素能量'
-      : xpRatio >= 0.9 ? '觉醒将至' : xpRatio >= 0.7 ? '元素开始共鸣' : '';
-    this.elements.health.replaceChildren(...Array.from({ length: player.maxHealth }, (_, index) => {
-      const pip = this.document.createElement('span');
-      pip.className = `health__pip${index >= player.health ? ' health__pip--empty' : ''}`;
-      return pip;
-    }));
+    const { snapshot, changed } = diffHudSnapshot(this.hudSnapshot, this.run);
+    this.hudSnapshot = snapshot;
 
-    const burstActive = this.run.time < this.run.burst.activeUntil;
-    const burstRatio = Math.min(1, this.run.burst.charge / this.run.burst.maxCharge);
-    const burstReady = burstRatio >= 1 && !burstActive && this.run.state === 'running';
-    this.elements.burstFill.style.transform = `scaleY(${burstRatio})`;
-    this.elements.burstValue.textContent = burstActive
-      ? `${Math.max(0, this.run.burst.activeUntil - this.run.time).toFixed(1)}s`
-      : `${Math.round(burstRatio * 100)}%`;
-    this.elements.burstButton.disabled = !burstReady;
-    this.elements.burstButton.classList.toggle('burst-button--ready', burstReady);
-    this.elements.burstButton.classList.toggle('burst-button--active', burstActive);
+    if (changed.time) {
+      this.elements.time.textContent = formatTime(this.run.time);
+      this.run.stats.hudWrites += 1;
+    }
+    if (changed.level) {
+      this.elements.level.textContent = `等级 ${player.level}`;
+      this.run.stats.hudWrites += 1;
+    }
+    if (changed.xp) {
+      const xpRatio = Math.min(1, player.xp / player.xpToNext);
+      this.elements.xp.style.width = `${xpRatio * 100}%`;
+      this.elements.xpBar.setAttribute('aria-valuenow', Math.round(xpRatio * 100));
+      this.elements.xpBar.classList.toggle('xp-bar--near', xpRatio >= 0.7);
+      this.elements.xpBar.classList.toggle('xp-bar--imminent', xpRatio >= 0.9);
+      const showXpTutorial = this.run.stats.xpCollected === 0 && this.run.xpOrbs.length > 0;
+      this.elements.xpHint.textContent = showXpTutorial
+        ? '靠近 ◇ 收集元素能量'
+        : xpRatio >= 0.9 ? '觉醒将至' : xpRatio >= 0.7 ? '元素开始共鸣' : '';
+      this.run.stats.hudWrites += 5;
+    }
+    if (changed.health) {
+      this.elements.health.replaceChildren(...Array.from({ length: player.maxHealth }, (_, index) => {
+        const pip = this.document.createElement('span');
+        pip.className = `health__pip${index >= player.health ? ' health__pip--empty' : ''}`;
+        return pip;
+      }));
+      this.run.stats.hudWrites += 1;
+    }
+
+    if (changed.burst) {
+      const burstActive = this.run.time < this.run.burst.activeUntil;
+      const burstRatio = Math.min(1, this.run.burst.charge / this.run.burst.maxCharge);
+      const burstReady = burstRatio >= 1 && !burstActive && this.run.state === 'running';
+      this.elements.burstFill.style.transform = `scaleY(${burstRatio})`;
+      this.elements.burstValue.textContent = burstActive
+        ? `${Math.max(0, this.run.burst.activeUntil - this.run.time).toFixed(1)}s`
+        : `${Math.round(burstRatio * 100)}%`;
+      this.elements.burstButton.disabled = !burstReady;
+      this.elements.burstButton.classList.toggle('burst-button--ready', burstReady);
+      this.elements.burstButton.classList.toggle('burst-button--active', burstActive);
+      this.run.stats.hudWrites += 5;
+    }
     if (!this.elements.eventBanner.hidden && this.run.time >= this.bannerUntil) {
       this.elements.eventBanner.hidden = true;
+      this.run.stats.hudWrites += 1;
     }
 
-    const reactionIds = this.run.fusionSlots;
-    const reactionHints = [];
-    if (this.run.fusionSlots.length < 2 && !this.run.unlockedReactions.fireTornado && this.run.weapons.fireball && this.run.weapons.windBlade) {
-      reactionHints.push('火 + 风 → 火焰龙卷｜持续环绕');
-    }
-    if (this.run.fusionSlots.length < 2 && !this.run.unlockedReactions.thermalShock && this.run.weapons.fireball && this.run.weapons.iceShard) {
-      reactionHints.push('火 + 冰 → 霜爆｜减速后引爆');
-    }
-    const mutationSignature = Object.entries(this.run.weaponMutations).map(([weapon, behavior]) => `${weapon}:${behavior}`).join(',');
-    const masterySignature = Object.entries(this.run.masteries).map(([id, rank]) => `${id}:${rank}`).join(',');
-    const signature = `${Object.keys(this.run.weapons).join(',')}|${reactionIds.join(',')}|${mutationSignature}|${masterySignature}|${reactionHints.join('|')}`;
-    if (signature !== this.lastWeaponSignature) {
+    if (changed.weapons) {
+      const reactionIds = this.run.fusionSlots;
+      const reactionHints = [];
+      if (this.run.fusionSlots.length < 2 && !this.run.unlockedReactions.fireTornado && this.run.weapons.fireball && this.run.weapons.windBlade) {
+        reactionHints.push('火 + 风 → 火焰龙卷｜持续环绕');
+      }
+      if (this.run.fusionSlots.length < 2 && !this.run.unlockedReactions.thermalShock && this.run.weapons.fireball && this.run.weapons.iceShard) {
+        reactionHints.push('火 + 冰 → 霜爆｜减速后引爆');
+      }
       const chips = Object.values(this.run.weapons).map((weapon) => {
         const chip = this.document.createElement('span');
         chip.className = `weapon-chip weapon-chip--${weapon.element}`;
@@ -330,7 +346,7 @@ export class GameApp {
         chips.push(chip);
       }
       this.elements.weapons.replaceChildren(...chips);
-      this.lastWeaponSignature = signature;
+      this.run.stats.hudWrites += 1;
     }
   }
 
@@ -348,10 +364,17 @@ export class GameApp {
       hardenedShell: '硬化外壳：敌人生命强化',
       volatilePursuit: '狂暴追猎：敌人速度强化',
     };
-    this.elements.eventBanner.textContent = event.type === 'worldRule'
+    const bannerText = event.type === 'worldRule'
       ? `世界法则 ${event.level} · ${ruleLabels[event.rule] ?? event.rule}`
       : event.type === 'eliteSpawn' ? '精英入侵 · 击破可获得高阶核心' : '元素爆发 · 全能力超载';
-    this.elements.eventBanner.hidden = false;
+    if (this.elements.eventBanner.textContent !== bannerText) {
+      this.elements.eventBanner.textContent = bannerText;
+      this.run.stats.hudWrites += 1;
+    }
+    if (this.elements.eventBanner.hidden) {
+      this.elements.eventBanner.hidden = false;
+      this.run.stats.hudWrites += 1;
+    }
     this.bannerUntil = this.run.time + (event.type === 'worldRule' ? 4 : 2.4);
   }
 
@@ -375,6 +398,11 @@ export class GameApp {
     Object.defineProperty(window, '__ELEMENTAL_SURVIVOR__', {
       configurable: false,
       value: Object.freeze({
+        sustain: () => {
+          if (!['running', 'levelUp', 'paused'].includes(this.run.state)) return false;
+          this.run.player.health = this.run.player.maxHealth;
+          return true;
+        },
         defeat: () => {
           const applied = damagePlayer(
             this.run,

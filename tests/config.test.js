@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { CONFIG, validateConfig } from '../src/data/config.js';
 
-test('V0.7 config has unique, referentially valid content', () => {
+test('V0.8 config has unique, referentially valid content', () => {
   assert.deepEqual(validateConfig(CONFIG), []);
   assert.deepEqual(Object.keys(CONFIG.weapons).sort(), ['fireball', 'iceShard', 'windBlade']);
   assert.deepEqual(Object.keys(CONFIG.enemies).sort(), ['brute', 'chaser', 'swift']);
@@ -36,4 +36,13 @@ test('Thermal Shock is a wide triggered burst with an independent cooldown', () 
   assert.equal(CONFIG.reactions.thermalShock.damage, 18);
   assert.equal(CONFIG.reactions.thermalShock.radius, 110);
   assert.equal(CONFIG.reactions.thermalShock.triggerCooldown, 0.8);
+});
+
+test('V0.8 visual budgets keep long-run glow and culling bounded', () => {
+  assert.equal(CONFIG.visual.viewportMargin, 96);
+  assert.deepEqual(CONFIG.visual.glow.xp, { far: 0, near: 4, rare: 6, elite: 6 });
+  assert.equal(CONFIG.visual.glow.projectile, 5);
+  assert.equal(CONFIG.visual.glow.reaction, 8);
+  assert.equal(CONFIG.visual.glow.burst, 12);
+  assert.equal(CONFIG.visual.glow.player, 12);
 });

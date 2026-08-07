@@ -54,3 +54,35 @@ test('query can reuse a caller-owned result array', () => {
   assert.equal(grid.queryCircle(0, 0, 10, output), output);
   assert.deepEqual(output.map(({ id }) => id), [4]);
 });
+
+test('candidate queries dedupe by object identity and preserve insertion order', () => {
+  const grid = new SpatialGrid(64);
+  const first = { id: 7, x: 90, y: 20, radius: 40 };
+  const second = { id: 7, x: 10, y: 20, radius: 2 };
+  const missingIdA = { x: 30, y: 20, radius: 2 };
+  const missingIdB = { x: 40, y: 20, radius: 2 };
+  grid.insert(first);
+  grid.insert(second);
+  grid.insert(missingIdA);
+  grid.insert(missingIdB);
+
+  const candidates = grid.queryCircleCandidates(40, 20, 100);
+
+  assert.deepEqual(candidates, [first, second, missingIdA, missingIdB]);
+});
+
+test('moving one entity updates its occupied cells without changing query order', () => {
+  const grid = new SpatialGrid(64);
+  const first = { id: 1, x: 10, y: 10, radius: 4 };
+  const moving = { id: 2, x: 20, y: 10, radius: 4 };
+  grid.rebuild([first, moving]);
+
+  const previousX = moving.x;
+  const previousY = moving.y;
+  moving.x = 150;
+  grid.update(moving, previousX, previousY);
+
+  assert.deepEqual(grid.queryCircle(10, 10, 24).map(({ id }) => id), [1]);
+  assert.deepEqual(grid.queryCircle(150, 10, 24).map(({ id }) => id), [2]);
+  assert.deepEqual(grid.queryCircleCandidates(80, 10, 100).map(({ id }) => id), [1, 2]);
+});

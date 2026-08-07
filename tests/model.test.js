@@ -55,13 +55,24 @@ test('createRun starts at the title with only Fireball and empty transient state
   assert.deepEqual(run.weaponMutations, {});
   assert.deepEqual(run.reactionTriggerCooldowns, {});
   assert.deepEqual(run.stats.killsByType, {});
-  assert.deepEqual(run.stats.peaks, { enemies: 0, projectiles: 0, particles: 0 });
+  assert.deepEqual(run.stats.current, { enemies: 0, projectiles: 0, xp: 0, particles: 0 });
+  assert.deepEqual(run.stats.peaks, { enemies: 0, projectiles: 0, xp: 0, particles: 0 });
+  assert.deepEqual(run.stats.collision, { candidates: 0, exactChecks: 0 });
+  assert.equal(run.stats.hudWrites, 0);
   assert.deepEqual(run.stats.fps, {
     average: 0,
     minimum: 0,
     samples: 0,
     hitches: 0,
     maximumInterval: 0,
+    rollingMedianFps: 0,
+    p95Interval: 0,
+    maximumIntervalWindow: 0,
+    over33ms: 0,
+    over50ms: 0,
+    over100ms: 0,
+    windowSeconds: 30,
+    windowSamples: 0,
   });
   assert.deepEqual(run.stats.milestones, {
     firstKillAt: null,
@@ -328,6 +339,13 @@ test('restart creates a clean running session without retaining transient state'
   oldRun.player.health = 1;
   oldRun.player.level = 8;
   oldRun.stats.kills = 99;
+  oldRun.stats.current.enemies = 12;
+  oldRun.stats.peaks.xp = 24;
+  oldRun.stats.collision.candidates = 88;
+  oldRun.stats.collision.exactChecks = 42;
+  oldRun.stats.hudWrites = 17;
+  oldRun.stats.fps.rollingMedianFps = 58;
+  oldRun.stats.fps.windowSamples = 300;
   oldRun.pendingLevelUps = 2;
   oldRun.currentUpgradeChoices = ['fleetFooted'];
 
@@ -352,6 +370,12 @@ test('restart creates a clean running session without retaining transient state'
   assert.deepEqual(restarted.currentUpgradeChoices, []);
   assert.equal(restarted.pendingLevelUps, 0);
   assert.equal(restarted.stats.kills, 0);
+  assert.deepEqual(restarted.stats.current, { enemies: 0, projectiles: 0, xp: 0, particles: 0 });
+  assert.deepEqual(restarted.stats.peaks, { enemies: 0, projectiles: 0, xp: 0, particles: 0 });
+  assert.deepEqual(restarted.stats.collision, { candidates: 0, exactChecks: 0 });
+  assert.equal(restarted.stats.hudWrites, 0);
+  assert.equal(restarted.stats.fps.rollingMedianFps, 0);
+  assert.equal(restarted.stats.fps.windowSamples, 0);
   assert.equal(oldRun.stats.kills, 99);
 });
 

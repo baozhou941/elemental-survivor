@@ -64,7 +64,7 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
   await page.goto('/?test=1');
   await expect(page.locator('html')).toHaveAttribute('data-game-ready', 'ready');
   await expect(page.getByRole('button', { name: '开始觉醒' })).toBeVisible();
-  await page.screenshot({ path: screenshotPath('v0.7-title') });
+  await page.screenshot({ path: screenshotPath('v0.8-title') });
 
   await page.getByRole('button', { name: '开始觉醒' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-game-state', 'running');
@@ -76,14 +76,14 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
 
   await expect.poll(async () => (await snapshot(page)).stats.attacks, { timeout: 8_000 }).toBeGreaterThan(0);
   await expect.poll(async () => (await snapshot(page)).enemyCount, { timeout: 8_000 }).toBeGreaterThan(0);
-  await page.screenshot({ path: screenshotPath('v0.7-gameplay') });
+  await page.screenshot({ path: screenshotPath('v0.8-gameplay') });
 
   await page.getByRole('button', { name: '暂停游戏' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-game-state', 'paused');
   const pausedAt = (await snapshot(page)).time;
   await page.waitForTimeout(350);
   expect((await snapshot(page)).time).toBe(pausedAt);
-  await page.screenshot({ path: screenshotPath('v0.7-paused') });
+  await page.screenshot({ path: screenshotPath('v0.8-paused') });
   await page.getByRole('button', { name: '继续战斗' }).click();
 
   const upgradeDeadline = Date.now() + 70_000;
@@ -101,7 +101,7 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
   await expect(page.locator('[data-upgrade-id="iceShardUnlock"]')).toContainText('霜爆');
   const neutralChoice = page.locator('[data-upgrade-id]:not([data-upgrade-id="windBladeUnlock"]):not([data-upgrade-id="iceShardUnlock"])');
   await expect(neutralChoice).toHaveCount(1);
-  await page.screenshot({ path: screenshotPath('v0.7-upgrade') });
+  await page.screenshot({ path: screenshotPath('v0.8-upgrade') });
   const firstUpgrade = page.locator('[data-upgrade-id]').first();
   const upgradeLabels = await page.locator('.upgrade-card__rarity').allTextContents();
   expect(upgradeLabels.length).toBeGreaterThan(0);
@@ -135,7 +135,7 @@ test('完整一局可以移动、战斗、升级、暂停、死亡并干净重�
   await expect(page.locator('#game-over-leaderboard li')).toHaveCount(1);
   await expect(page.locator('#game-over-leaderboard')).toContainText('#1');
   expect(ended.leaderboard).toHaveLength(1);
-  await page.screenshot({ path: screenshotPath('v0.7-game-over') });
+  await page.screenshot({ path: screenshotPath('v0.8-game-over') });
 
   const restarted = await page.evaluate(() => {
     document.querySelector('#restart-button').click();
@@ -160,6 +160,15 @@ test('生产入口不暴露测试控制 API', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('data-game-ready', 'ready');
   expect(await page.evaluate(() => '__ELEMENTAL_SURVIVOR__' in window)).toBe(false);
+});
+
+test('测试入口提供长时性能续航控制', async ({ page }) => {
+  await page.goto('/?test=1');
+  await expect(page.locator('html')).toHaveAttribute('data-game-ready', 'ready');
+  expect(await page.evaluate(() => typeof window.__ELEMENTAL_SURVIVOR__.sustain)).toBe('function');
+  expect(await page.evaluate(() => window.__ELEMENTAL_SURVIVOR__.sustain())).toBe(false);
+  await page.getByRole('button', { name: '开始觉醒' }).click();
+  expect(await page.evaluate(() => window.__ELEMENTAL_SURVIVOR__.sustain())).toBe(true);
 });
 
 test.describe('手机触控', () => {

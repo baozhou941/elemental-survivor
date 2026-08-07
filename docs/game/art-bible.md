@@ -1,68 +1,105 @@
-# Elemental Survivor Art Bible（V0.7）
+# Elemental Survivor Art Bible (V0.8)
 
-## Final direction
+## Production direction
 
-The production direction is **Elemental Sigil Minimalism**: 55% Minimal Premium, 35% Neon Elemental, and 10% Arcane Fantasy. The visual foundation is a dark desaturated arena, a bright crystalline player core, strongly separated element hues, geometric threat silhouettes, and restrained arcane sigils. This mix keeps long-session readability and Canvas performance while giving elemental reactions a recognizable identity.
+The selected hybrid is **Elemental Sigil Minimalism**:
 
-## Direction candidates for review
+- 65% Minimal Premium: clean silhouettes, restrained contrast, and long-session readability.
+- 25% Neon Elemental: bright elemental edges and concise combat accents.
+- 10% Arcane Fantasy: sigils and ritual geometry reserved for reactions and major moments.
 
-| Direction | Strength | Risk | Web cost |
-| --- | --- | --- | --- |
-| Neon Elemental | Immediate elemental contrast and inexpensive procedural VFX | Can become visually tiring or resemble generic neon arcade art | Low to moderate |
-| Arcane Fantasy | Strong world identity, symbols, and creature potential | Highest asset and animation cost; intricate details can reduce readability | Moderate to high |
-| Minimal Premium | Clean silhouettes, excellent clarity, and controlled fatigue | May feel emotionally cool or insufficiently magical | Low |
-
-The comparison remains as production history; V0.7 has selected the mixed direction above. New assets must match it rather than independently inventing another style.
+The arena stays dark and quiet. Gameplay entities earn brightness through importance, not through quantity. New art must follow this mix rather than creating an independent style.
 
 ## Visual hierarchy
 
-Every frame follows: **player > elite/Boss > normal enemies > player skills > XP**. Brightness, edge contrast, size, motion, and glow are allocated in that order. XP may become brighter only inside the pickup neighborhood; ordinary attacks must not outshine elites or the player; decorative particles degrade before gameplay information.
+Every frame follows this order:
 
-## Shape language
+**player > hostile telegraphs/projectiles > elite > normal enemy > player skill > XP**
 
-- Player: faceted crystal core with a persistent white center, forward facet, and restrained outer sigil ring. The core retains the last movement direction; equipped Fire, Wind, and Ice appear as small distinct orbiting sigils rather than a color wash.
-- Chaser: forward-pointing notched diamond with an internal chevron.
-- Swift: narrow notched dart with two internal speed lines.
-- Brute: broad, flattened hexagonal silhouette with two internal armor plates.
-- XP: common energy uses a small white-cyan hollow diamond; rare energy uses a larger gold hexagonal crystal; elite energy uses a bright multi-ring core. Attraction uses a short curved trail and never hides the player.
-- Harmful areas: warm outlined boundaries with a readable pre-impact phase.
-- Beneficial or player-owned areas: solid elemental edge plus softer interior motion.
+Silhouette, edge contrast, size, motion, and glow are allocated in that order. Decorative particles degrade first. An effect that obscures the player, a hostile warning, or the source of damage is invalid even when it looks impressive.
 
-## Element colors
+## Player language
 
-| Element | Primary | Secondary | Motion language |
+- Body: an asymmetric faceted crystal with a persistent white core and a clear forward point.
+- Direction: a broken/notched forward arc remains readable while moving or standing still.
+- Health: a compact rear arc communicates remaining HP without competing with hostile warnings.
+- Build: Fire, Ice, and Wind sockets use fixed positions around the body. They do not orbit, so a player's current build can be read at a glance.
+- State: invulnerability modulates core opacity. Damage direction remains a short directional arc.
+- Rendering-only extensions never change the player's gameplay radius.
+
+## Enemy silhouettes
+
+- Chaser: notched forward wedge with a central chevron; persistent pursuit threat.
+- Swift: narrow twin-fin dart; fast and fragile even without color.
+- Brute: broad armored hexagon with heavy side plates; slow pressure threat.
+- Elite: keeps the base silhouette and adds a gold outer edge plus a restrained pulse ring.
+- Slow status: four cyan edge ticks preserve the enemy's identity color instead of recoloring its entire body.
+
+## XP energy tiers
+
+- Common: a small point/diamond. It has no glow at distance and only a faint pickup-neighborhood glow.
+- Rare: a double crystal with a gold-white center.
+- Elite: a faceted prism with a short directional tail.
+
+XP remains quieter than attacks and enemies. Attraction trails must be short and may never cover the player.
+
+## Element shape language
+
+| Element | Primary color | Projectile shape | Motion language |
 | --- | --- | --- | --- |
-| Fire | orange-red | warm yellow | expanding bursts and rising sparks |
-| Ice | cyan | pale blue-white | sharp facets and decelerating trails |
-| Lightning | electric violet | white | branching, discontinuous arcs |
-| Wind | mint green | desaturated teal | curved ribbons and rotational flow |
-| Poison | acid green | deep magenta | bubbles, droplets, and pulsing pools |
+| Fire | orange-red | asymmetric ember dart | expanding bursts and rising sparks |
+| Ice | cyan | long faceted shard | sharp lines and decelerating trails |
+| Lightning | electric violet | broken bolt | discontinuous branches |
+| Wind | mint | curved crescent blade | ribbons and rotational flow |
+| Poison | acid green | weighted droplet | bubbles and pulsing pools |
 
-Color is never the only differentiator; shape and motion must communicate the same element.
+Color is never the only identifier. Shape and motion must communicate the same element.
 
-## Character state overlays
+## Reaction language
 
-- Enemy identity colors and silhouettes remain visible while slowed. Ice slow is drawn as four cyan edge ticks instead of replacing the body color.
-- Player invulnerability modulates white-core opacity instead of recoloring the whole body. The existing short red-white directional arc communicates the damage source.
-- Character gameplay radii are not changed by visual extensions; darts, notches, and rings are rendering-only.
-- Elite identity uses a gold outer edge and pulse ring while preserving the base enemy silhouette and internal threat glyph.
+Reactions inherit recognizable geometry from both parent elements and add a restrained arcane boundary:
 
-## Element burst
+- Fire Tornado: Fire's pointed heat core inside Wind's rotating mint boundary.
+- Thermal Shock: Ice facets interrupted by a warm Fire shock polygon.
+- Future reactions must preserve both parent silhouettes before adding decorative sigils.
 
-The charged state adds a restrained gold-white cadence to the player's sigil ring. Activation expands as a hexagonal shock ring followed by a six-second warm core pulse. It must communicate a tactical window without becoming a full-screen clear, hiding enemy telegraphs, or changing collision radii.
+Reaction boundaries are larger and brighter than ordinary skills but remain below hostile telegraphs and the player in the hierarchy.
 
-## Layering and readability
+## Glow budgets
 
-The arena background has the lowest contrast. XP sits above the arena but below attacks. Enemies and hostile projectiles remain distinct from player attacks. The player, damage direction cue, and critical HUD information render above decorative particles. Screen flashes are translucent and brief; camera shake is reserved for kills, reactions, and death rather than routine attacks.
+Canvas shadow blur is capped by category:
 
-## UI and typography
+| Category | Maximum blur |
+| --- | ---: |
+| Far common XP | 0 px |
+| Near common XP | 4 px |
+| Rare/elite XP | 6 px |
+| Normal projectile | 5 px |
+| Element reaction | 8 px |
+| Burst/death accent | 12 px, time-limited |
+| Player core | 12 px |
 
-HUD panels use dark translucent surfaces, thin luminous borders, large numeric values, and a system sans-serif stack for zero font-loading delay. Upgrade cards show rarity, element color, a geometric icon, a one-line behavior change, and current-to-next values where applicable.
+Glow is an accent, not a material. Full-screen blur, uncontrolled additive layers, and permanent bloom are excluded.
 
-## Animation and effects
+## Viewport and performance rules
 
-Movement and projectiles favor smooth curves. Enemy hit flash is short enough to preserve silhouette. Death collapses or bursts outward according to enemy mass. Fire Tornado combines the orange Fire palette with mint Wind ribbons and a distinct rotating boundary, making the reaction recognizable even without text.
+- Dynamic world entities are renderer-culled outside the viewport plus a **96 px margin**.
+- Culling changes drawing only. Simulation, collision, spawning, damage, and XP attraction continue unchanged off-screen.
+- Particle counts remain capped and decorative particles are removed before gameplay information.
+- Avoid per-frame image allocation and temporary arrays in hot rendering paths.
+- DPR remains capped. Resume, restart, and long-session play must not accumulate rendering state or duplicate loops.
 
-## Performance limits
+## UI and readability
 
-V0.7 uses Canvas primitives and cached gradients where useful. Decorative particle counts are capped and degrade before gameplay entities. Expensive full-screen blur, uncontrolled additive layering, texture spam, and per-frame image allocation are excluded. DPR remains capped and the ordinary 3-minute stress target is approximately 60 FPS with no sustained hitching.
+HUD panels use dark translucent surfaces, thin luminous borders, large numeric values, and a system sans-serif stack. Upgrade cards show rarity, element shape/color, one concise behavior change, and current-to-next values where useful.
+
+The player, hostile warning, damage source, and critical HUD must remain readable during the densest wave. Routine attacks do not receive camera shake; major reactions, elite deaths, player death, and victory may use brief restrained emphasis.
+
+## V0.8 acceptance checklist
+
+- Player facing, health, and equipped elements are legible without text.
+- Chaser, Swift, and Brute are distinguishable in silhouette.
+- Common, rare, and elite XP are distinguishable by shape and intensity.
+- Projectiles and reactions remain inside their glow budgets.
+- Off-screen rendering is culled at the 96 px margin without changing gameplay state.
+- A crowded frame still communicates the player location and the nearest hostile threat first.

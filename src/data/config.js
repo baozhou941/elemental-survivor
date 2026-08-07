@@ -111,6 +111,17 @@ const reactions = Object.freeze({
   }),
 });
 
+const visual = Object.freeze({
+  viewportMargin: 96,
+  glow: Object.freeze({
+    xp: Object.freeze({ far: 0, near: 4, rare: 6, elite: 6 }),
+    projectile: 5,
+    reaction: 8,
+    burst: 12,
+    player: 12,
+  }),
+});
+
 export const CONFIG = Object.freeze({
   fixedStep: 1 / 60,
   maxDelta: 0.1,
@@ -140,6 +151,7 @@ export const CONFIG = Object.freeze({
   enemies,
   upgrades,
   reactions,
+  visual,
 });
 
 export function validateConfig(config) {

@@ -104,6 +104,17 @@ test('Fireball automatically aims at the nearest target and obeys cooldown', () 
   assert.equal(run.projectiles.length, 1);
 });
 
+test('equal-distance auto aim keeps the first enemy insertion as the tie-breaker', () => {
+  const run = createRun({ state: 'running' });
+  spawnEnemy(run, 'chaser', run.player.x + 100, run.player.y);
+  spawnEnemy(run, 'chaser', run.player.x - 100, run.player.y);
+
+  stepWeapons(run, 1 / 60);
+
+  assert.ok(run.projectiles[0].vx > 0);
+  assert.ok(Math.abs(run.projectiles[0].vy) < 0.001);
+});
+
 test('weapon mutations change combat behavior instead of only changing the upgrade card', () => {
   const orbitRun = createRun({ state: 'running' });
   orbitRun.weaponMutations.fireball = 'flameOrbit';
@@ -192,6 +203,111 @@ test('Wind Blade pierces several aligned enemies', () => {
   assert.ok(enemies.every(({ dead }) => dead));
   assert.equal(run.stats.kills, 3);
   assert.equal(run.stats.damageByWeapon.windBlade, CONFIG.weapons.windBlade.damage * 3);
+});
+
+test('projectile candidates keep insertion-order pierce and hitIds semantics', () => {
+  const createOverlapRun = () => {
+    const run = createRun({ state: 'running' });
+    const first = spawnEnemy(run, 'brute', 118, 200);
+    const second = spawnEnemy(run, 'brute', 74, 200);
+    first.health = 100;
+    second.health = 100;
+    return { run, first, second };
+  };
+  const addProjectile = (run, hitIds = new Set()) => {
+    run.projectiles.push({
+      id: 8901,
+      x: 96,
+      y: 200,
+      vx: 0,
+      vy: 0,
+      radius: 2,
+      lifetime: 1,
+      damage: 1,
+      pierceRemaining: 0,
+      weaponId: 'windBlade',
+      element: 'wind',
+      hitIds,
+      expired: false,
+    });
+  };
+
+  const ordered = createOverlapRun();
+  addProjectile(ordered.run);
+  stepProjectiles(ordered.run, 0);
+  assert.equal(ordered.first.health, 99);
+  assert.equal(ordered.second.health, 100);
+
+  const skipped = createOverlapRun();
+  addProjectile(skipped.run, new Set([skipped.first.id]));
+  stepProjectiles(skipped.run, 0);
+  assert.equal(skipped.first.health, 100);
+  assert.equal(skipped.second.health, 99);
+});
+
+test('projectile broad phase prunes distant enemies and records exact collision work', () => {
+  const run = createRun({ state: 'running' });
+  const target = spawnEnemy(run, 'brute', 202, 200);
+  target.health = 1000;
+  for (let index = 0; index < 20; index += 1) {
+    spawnEnemy(run, 'brute', 900 + index * 30, 700);
+  }
+  run.projectiles.push({
+    id: 9001,
+    x: target.x,
+    y: target.y,
+    vx: 0,
+    vy: 0,
+    radius: 2,
+    lifetime: 1,
+    damage: 1,
+    pierceRemaining: 0,
+    weaponId: 'fireball',
+    element: 'fire',
+    hitIds: new Set(),
+    expired: false,
+  });
+
+  stepProjectiles(run, 0);
+
+  assert.equal(target.health, 999);
+  assert.ok(run.stats.collision.candidates < 21);
+  assert.ok(run.stats.collision.exactChecks > 0);
+  assert.ok(run.stats.collision.exactChecks <= run.stats.collision.candidates);
+});
+
+test('vacuum blade movement invalidates the grid for a later projectile in the same step', () => {
+  const run = createRun({ state: 'running' });
+  run.player.x = 0;
+  run.player.y = 200;
+  const target = spawnEnemy(run, 'brute', 205, 200);
+  target.radius = 4;
+  target.health = 100;
+  const projectile = (id, x, behavior) => ({
+    id,
+    x,
+    y: 200,
+    vx: 0,
+    vy: 0,
+    radius: 2,
+    lifetime: 1,
+    damage: 1,
+    pierceRemaining: 0,
+    weaponId: 'windBlade',
+    element: 'wind',
+    behavior,
+    hitIds: new Set(),
+    expired: false,
+  });
+  run.projectiles.push(
+    projectile(9101, 205, 'vacuumBlade'),
+    projectile(9102, 171),
+  );
+
+  stepProjectiles(run, 0);
+
+  assert.equal(target.x, 171);
+  assert.equal(target.health, 98);
 });
 
 test('Ice Shard applies a temporary movement slow', () => {
@@ -333,6 +449,27 @@ test('Fire Tornado creates one active reaction and respects per-target hit caden
   assert.equal(run.stats.damageByReaction.fireTornado, CONFIG.reactions.fireTornado.damage * 2);
   assert.equal(run.stats.reactionHits.fireTornado, 2);
   assert.equal(run.reactions[0].hits, 2);
+});
+
+test('Fire Tornado broad phase ignores enemies far from its area', () => {
+  const run = createRun({ state: 'running' });
+  run.unlockedReactions.fireTornado = true;
+  const target = spawnEnemy(
+    run,
+    'brute',
+    run.player.x + CONFIG.reactions.fireTornado.orbitRadius,
+    run.player.y,
+  );
+  for (let index = 0; index < 20; index += 1) {
+    spawnEnemy(run, 'brute', 50 + index * 20, 50);
+  }
+
+  ensureReactions(run);
+  stepReactions(run, 0);
+
+  assert.ok(target.health < target.maxHealth);
+  assert.ok(run.stats.collision.candidates < 21);
+  assert.ok(run.stats.collision.exactChecks > 0);
 });
 
 test('Fire Tornado initially aims toward the nearest enemy', () => {
@@ -479,6 +616,13 @@ test('stepSimulation advances a running run and freezes modal states', () => {
   assert.ok(run.enemies.length > 0);
   assert.equal(run.stats.peaks.enemies, run.enemies.length);
   assert.ok(run.stats.peaks.projectiles > 0);
+  assert.deepEqual(run.stats.current, {
+    enemies: run.enemies.length,
+    projectiles: run.projectiles.length,
+    xp: run.xpOrbs.length,
+    particles: run.particles.length,
+  });
+  assert.equal(run.stats.peaks.xp, run.xpOrbs.length);
 
   const frozen = { time: run.time, x: run.player.x, enemyX: run.enemies[0].x };
   run.state = 'levelUp';
